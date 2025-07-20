@@ -214,10 +214,30 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info(f"Bio present: {bio is not None}, Bio content: '{text}'")
         logger.info(f"Expected GROUP_ID: {GROUP_ID}, Actual chat_id: {chat_id}")
         
-        # Если bio отсутствует, отклоняем сразу
+        # Если bio отсутствует, отклоняем и отправляем инструкции
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio provided")
             await context.bot.decline_chat_join_request(chat_id, user_id)
+            
+            # Отправляем инструкции пользователю в личные сообщения
+            try:
+                instruction_message = (
+                    "Привет, спасибо за заявку в чате выпускников 30ки.\n\n"
+                    "Это админ чата Сергей Федоров, 1983-2.\n\n"
+                    "Для доступа в чат просьба повторно подать заявку и указать в описании:\n"
+                    "• ФИО: [Ваши Фамилия Имя]\n"
+                    "• Год: [год выпуска]\n"
+                    "• Класс: [номер класса]\n\n"
+                    "Пример заполнения:\n"
+                    "ФИО: Иван Петров\n"
+                    "Год: 2015\n"
+                    "Класс: 3"
+                )
+                await context.bot.send_message(chat_id=user_id, text=instruction_message)
+                logger.info(f"Sent instructions to user {user_id}")
+            except Exception as e:
+                logger.warning(f"Could not send instructions to user {user_id}: {e}")
+            
             return
         
         fio, year, klass = parse_text(text)
@@ -226,14 +246,60 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not (fio and year and klass):
             logger.info(f"Declining request from {user_id}: incomplete data (FIO: {bool(fio)}, Year: {bool(year)}, Class: {bool(klass)})")
             await context.bot.decline_chat_join_request(chat_id, user_id)
+            
+            # Отправляем инструкции о правильном формате
+            try:
+                missing_fields = []
+                if not fio: missing_fields.append("ФИО")
+                if not year: missing_fields.append("Год выпуска")
+                if not klass: missing_fields.append("Класс")
+                
+                instruction_message = (
+                    "Привет, спасибо за заявку в чате выпускников 30ки.\n\n"
+                    "Это админ чата Сергей Федоров, 1983-2.\n\n"
+                    f"В вашей заявке не хватает: {', '.join(missing_fields)}\n\n"
+                    "Для доступа в чат просьба повторно подать заявку и указать в описании:\n"
+                    "• ФИО: [Ваши Фамилия Имя]\n"
+                    "• Год: [год выпуска]\n"
+                    "• Класс: [номер класса]\n\n"
+                    "Пример заполнения:\n"
+                    "ФИО: Иван Петров\n"
+                    "Год: 2015\n"
+                    "Класс: 3"
+                )
+                await context.bot.send_message(chat_id=user_id, text=instruction_message)
+                logger.info(f"Sent format instructions to user {user_id}")
+            except Exception as e:
+                logger.warning(f"Could not send format instructions to user {user_id}: {e}")
+            
             return
 
         if check_user(fio, year, klass):
             logger.info(f"Approving request from {user_id}")
-            await context.bot.approve_chat_join_request(update.chat.id, user_id)
+            await context.bot.approve_chat_join_request(chat_id, user_id)
         else:
             logger.info(f"Declining request from {user_id}: user not found in database")
-            await context.bot.decline_chat_join_request(update.chat.id, user_id)
+            await context.bot.decline_chat_join_request(chat_id, user_id)
+            
+            # Отправляем сообщение о том, что пользователь не найден
+            try:
+                not_found_message = (
+                    "Привет, спасибо за заявку в чате выпускников 30ки.\n\n"
+                    "Это админ чата Сергей Федоров, 1983-2.\n\n"
+                    f"К сожалению, в базе выпускников не найден пользователь:\n"
+                    f"ФИО: {fio}\n"
+                    f"Год выпуска: {year}\n"
+                    f"Класс: {klass}\n\n"
+                    "Возможные причины:\n"
+                    "• Опечатка в написании ФИО\n"
+                    "• Указан неверный год выпуска или класс\n"
+                    "• Данные отсутствуют в базе школы\n\n"
+                    "Пожалуйста, проверьте данные и подайте заявку повторно или обратитесь к администратору."
+                )
+                await context.bot.send_message(chat_id=user_id, text=not_found_message)
+                logger.info(f"Sent 'not found' message to user {user_id}")
+            except Exception as e:
+                logger.warning(f"Could not send 'not found' message to user {user_id}: {e}")
             
     except Exception as e:
         logger.error(f"Error handling join request: {e}")
