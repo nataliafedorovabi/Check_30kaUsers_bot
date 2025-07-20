@@ -205,16 +205,27 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         user_id = update.chat_join_request.from_user.id
         chat_id = update.chat_join_request.chat.id
-        text = update.chat_join_request.bio or ""
         
-        logger.info(f"Processing join request from user {user_id} in chat {chat_id} with bio: {text}")
+        # Получаем bio (может отсутствовать)
+        bio = getattr(update.chat_join_request, 'bio', None)
+        text = bio or ""
+        
+        logger.info(f"Processing join request from user {user_id} in chat {chat_id}")
+        logger.info(f"Bio present: {bio is not None}, Bio content: '{text}'")
         logger.info(f"Expected GROUP_ID: {GROUP_ID}, Actual chat_id: {chat_id}")
         
+        # Если bio отсутствует, отклоняем сразу
+        if not bio:
+            logger.info(f"Declining request from {user_id}: no bio provided")
+            await context.bot.decline_chat_join_request(chat_id, user_id)
+            return
+        
         fio, year, klass = parse_text(text)
+        logger.info(f"Parsed data - FIO: '{fio}', Year: '{year}', Class: '{klass}'")
 
         if not (fio and year and klass):
-            logger.info(f"Declining request from {user_id}: incomplete data")
-            await context.bot.decline_chat_join_request(update.chat.id, user_id)
+            logger.info(f"Declining request from {user_id}: incomplete data (FIO: {bool(fio)}, Year: {bool(year)}, Class: {bool(klass)})")
+            await context.bot.decline_chat_join_request(chat_id, user_id)
             return
 
         if check_user(fio, year, klass):
@@ -257,21 +268,35 @@ def webhook():
         
         # Обрабатываем update напрямую
         if update.chat_join_request:
+            logger.info("Found chat_join_request, processing...")
             import asyncio
             from telegram.ext import ContextTypes
             
             async def process_join_request():
-                context = ContextTypes.DEFAULT_TYPE()
-                await handle_join_request(update, context)
+                try:
+                    # Создаем контекст с ботом
+                    context = ContextTypes.DEFAULT_TYPE()
+                    context._bot = telegram_app.bot
+                    await handle_join_request(update, context)
+                except Exception as e:
+                    logger.error(f"Error in process_join_request: {e}")
             
-            # Запускаем в новом event loop
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+            # Запускаем асинхронно
+            import threading
             
-            loop.create_task(process_join_request())
+            def run_async():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(process_join_request())
+                    loop.close()
+                except Exception as e:
+                    logger.error(f"Error in async execution: {e}")
+            
+            thread = threading.Thread(target=run_async)
+            thread.start()
+        else:
+            logger.info("No chat_join_request found in update")
         
         return "ok"
     except Exception as e:
