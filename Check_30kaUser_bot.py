@@ -1,98 +1,241 @@
 import os
 import pymysql
+import logging
+from contextlib import contextmanager
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, ChatJoinRequestHandler
 
+# Загружаем переменные окружения из .env файла (для локальной разработки)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # В production dotenv может отсутствовать
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Настройки из окружения
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-DB_HOST = os.environ["DB_HOST"]
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+DB_HOST = os.environ.get("DB_HOST")
 DB_PORT = int(os.environ.get("DB_PORT", 3306))
-DB_NAME = os.environ["DB_NAME"]
-DB_USER = os.environ["DB_USER"]
-DB_PASSWORD = os.environ["DB_PASSWORD"]
-WEBHOOK_URL = os.environ["WEBHOOK_URL"]
-GROUP_ID = int(os.environ["GROUP_ID"])
+DB_NAME = os.environ.get("DB_NAME")
+DB_USER = os.environ.get("DB_USER")
+DB_PASSWORD = os.environ.get("DB_PASSWORD")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+GROUP_ID = int(os.environ.get("GROUP_ID", 0))
+PORT = int(os.environ.get("PORT", 10000))
+
+# Проверяем наличие обязательных переменных
+required_vars = ["BOT_TOKEN", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD", "WEBHOOK_URL"]
+missing_vars = [var for var in required_vars if not os.environ.get(var)]
+if missing_vars:
+    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 # Flask-приложение
 app = Flask(__name__)
 
-# Подключение к MySQL
+# Контекстный менеджер для подключения к БД
+@contextmanager
 def get_db_connection():
-    return pymysql.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME,
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor
-    )
+    conn = None
+    try:
+        conn = pymysql.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        yield conn
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
-# Нормализация ФИО
+# Нормализация ФИО с улучшенной логикой
 def normalize_fio(raw_fio):
-    parts = raw_fio.strip().lower().split()
-    if len(parts) == 3:
-        parts = parts[:2]  # Убираем отчество
+    """
+    Нормализует ФИО: приводит к нижнему регистру, убирает лишние пробелы,
+    создает множество из 2-3 частей для гибкого сравнения
+    """
+    if not raw_fio:
+        return set()
+    
+    parts = [part.strip().lower() for part in raw_fio.strip().split() if part.strip()]
+    
+    # Удаляем отчество если оно есть (берем максимум 2 части)
+    if len(parts) > 2:
+        parts = parts[:2]
+    
     return set(parts)
 
-# Проверка выпускника
-def check_user(fio, year, klass):
-    fio_set = normalize_fio(fio)
-    conn = get_db_connection()
+def format_year_for_db(year_str):
+    """Форматирует год для поиска в БД (добавляет .00)"""
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT fio FROM users WHERE year = %s AND klass = %s", (year, klass))
-            rows = cursor.fetchall()
-            for row in rows:
-                db_fio_set = normalize_fio(row['fio'])
-                if fio_set == db_fio_set:
-                    return True
-    finally:
-        conn.close()
+        year_int = int(year_str)
+        return f"{year_int}.00"
+    except ValueError:
+        logger.warning(f"Invalid year format: {year_str}")
+        return None
+
+def format_class_for_db(class_str):
+    """Форматирует класс для поиска в БД (добавляет .00)"""
+    try:
+        class_int = int(class_str)
+        return f"{class_int}.00"
+    except ValueError:
+        logger.warning(f"Invalid class format: {class_str}")
+        return None
+
+# Проверка выпускника с улучшенной логикой
+def check_user(fio, year, klass):
+    """
+    Проверяет наличие пользователя в БД с гибким сравнением ФИО
+    """
+    if not (fio and year and klass):
+        return False
+        
+    fio_set = normalize_fio(fio)
+    if not fio_set:
+        return False
+    
+    # Форматируем год и класс для БД
+    formatted_year = format_year_for_db(year)
+    formatted_class = format_class_for_db(klass)
+    
+    if not (formatted_year and formatted_class):
+        return False
+    
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT fio FROM users WHERE year = %s AND klass = %s", 
+                    (formatted_year, formatted_class)
+                )
+                rows = cursor.fetchall()
+                
+                for row in rows:
+                    db_fio_set = normalize_fio(row['fio'])
+                    
+                    # Проверяем совпадение: все части введенного ФИО должны присутствовать в БД
+                    # Это позволяет работать с перестановками и отсутствием отчества
+                    if fio_set.issubset(db_fio_set) or db_fio_set.issubset(fio_set):
+                        logger.info(f"User found: {fio} -> {row['fio']}")
+                        return True
+                        
+    except Exception as e:
+        logger.error(f"Error checking user: {e}")
+        return False
+    
+    logger.info(f"User not found: {fio}, {year}, {klass}")
     return False
 
-# Парсинг входного текста — настроить под твою форму ввода
+# Парсинг входного текста
 def parse_text(text):
-    # Пример: "ФИО: Иван Петров\nГод: 2015\nКласс: 3"
+    """
+    Парсит текст заявки и извлекает ФИО, год и класс
+    Поддерживает различные форматы ввода
+    """
+    if not text:
+        return None, None, None
+        
     lines = text.split('\n')
     data = {}
+    
     for line in lines:
+        line = line.strip()
         if ':' in line:
             key, val = line.split(':', 1)
-            data[key.strip().lower()] = val.strip()
+            key_lower = key.strip().lower()
+            val_clean = val.strip()
+            
+            # Нормализуем ключи
+            if key_lower in ['фио', 'фамилия имя', 'имя фамилия', 'fio']:
+                data['фио'] = val_clean
+            elif key_lower in ['год', 'год выпуска', 'year']:
+                data['год'] = val_clean
+            elif key_lower in ['класс', 'class', 'группа']:
+                data['класс'] = val_clean
+    
     return data.get('фио'), data.get('год'), data.get('класс')
 
 # Обработка заявки
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.chat_join_request.bio or ""
-    fio, year, klass = parse_text(text)
+    """Обрабатывает заявку на вступление в группу"""
+    try:
+        user_id = update.chat_join_request.from_user.id
+        text = update.chat_join_request.bio or ""
+        
+        logger.info(f"Processing join request from user {user_id} with bio: {text}")
+        
+        fio, year, klass = parse_text(text)
 
-    if not (fio and year and klass):
-        await context.bot.decline_chat_join_request(update.chat.id, update.chat_join_request.from_user.id)
-        return
+        if not (fio and year and klass):
+            logger.info(f"Declining request from {user_id}: incomplete data")
+            await context.bot.decline_chat_join_request(update.chat.id, user_id)
+            return
 
-    if check_user(fio, year, klass):
-        await context.bot.approve_chat_join_request(update.chat.id, update.chat_join_request.from_user.id)
-    else:
-        await context.bot.decline_chat_join_request(update.chat.id, update.chat_join_request.from_user.id)
+        if check_user(fio, year, klass):
+            logger.info(f"Approving request from {user_id}")
+            await context.bot.approve_chat_join_request(update.chat.id, user_id)
+        else:
+            logger.info(f"Declining request from {user_id}: user not found in database")
+            await context.bot.decline_chat_join_request(update.chat.id, user_id)
+            
+    except Exception as e:
+        logger.error(f"Error handling join request: {e}")
+        # В случае ошибки отклоняем заявку
+        try:
+            await context.bot.decline_chat_join_request(
+                update.chat.id, 
+                update.chat_join_request.from_user.id
+            )
+        except:
+            pass
 
 # Telegram application
 telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 telegram_app.add_handler(ChatJoinRequestHandler(handle_join_request))
 
 # Flask endpoint for Telegram webhook
-@app.post("/")
+@app.route("/", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.update_queue.put(update)
-    return "ok"
+    """Webhook endpoint для получения обновлений от Telegram"""
+    try:
+        update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+        telegram_app.update_queue.put(update)
+        return "ok"
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return "error", 500
 
-# Установка webhook при запуске
-@app.before_first_request
-def setup_webhook():
-    telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/")
+# Установка webhook
+async def setup_webhook():
+    """Устанавливает webhook для бота"""
+    try:
+        await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/")
+        logger.info(f"Webhook set to {WEBHOOK_URL}/")
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
 
 # Запуск
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    import asyncio
+    
+    # Устанавливаем webhook при запуске
+    asyncio.run(setup_webhook())
+    
+    logger.info("Starting Flask application")
+    app.run(host="0.0.0.0", port=PORT, debug=False)
