@@ -20,6 +20,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Отключаем warning'и Werkzeug в production
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.setLevel(logging.ERROR)
+
 # Вспомогательная функция для безопасного получения переменных окружения
 def get_env_var(var_name, default=None, var_type=str):
     """
