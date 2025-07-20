@@ -340,9 +340,9 @@ def webhook():
             
             async def process_join_request():
                 try:
-                    # Создаем контекст с ботом
-                    context = ContextTypes.DEFAULT_TYPE()
-                    context._bot = telegram_app.bot
+                    # Создаем контекст с application
+                    from telegram.ext import CallbackContext
+                    context = CallbackContext(application=telegram_app)
                     await handle_join_request(update, context)
                 except Exception as e:
                     logger.error(f"Error in process_join_request: {e}")
