@@ -403,6 +403,8 @@ async def setup_webhook():
         #         logger.warning(f"Could not update group description: {e}")
         
         logger.info("Automatic group description update is disabled")
+logger.info(f"Current GROUP_ID setting: {GROUP_ID}")
+logger.info(f"Bot will process requests from any group for debugging")
                 
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
