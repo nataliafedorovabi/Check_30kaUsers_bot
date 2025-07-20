@@ -206,8 +206,19 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_id = update.chat_join_request.from_user.id
         chat_id = update.chat_join_request.chat.id
         
-        # Получаем bio (может отсутствовать)
+        # Получаем все возможные поля из заявки
         bio = getattr(update.chat_join_request, 'bio', None)
+        
+        # Проверяем все атрибуты chat_join_request для отладки
+        logger.info(f"ChatJoinRequest attributes: {dir(update.chat_join_request)}")
+        logger.info(f"Full ChatJoinRequest: {update.chat_join_request}")
+        
+        # Может быть это поле называется по-другому?
+        for attr in ['bio', 'message', 'text', 'comment', 'description']:
+            value = getattr(update.chat_join_request, attr, None)
+            if value:
+                logger.info(f"Found {attr}: {value}")
+        
         text = bio or ""
         
         logger.info(f"Processing join request from user {user_id} in chat {chat_id}")
@@ -375,6 +386,27 @@ async def setup_webhook():
     try:
         await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/")
         logger.info(f"Webhook set to {WEBHOOK_URL}/")
+        
+        # Попробуем настроить описание группы
+        if GROUP_ID != 0:
+            try:
+                description = (
+                    "🎓 Чат выпускников школы №30\n\n"
+                    "Для вступления подайте заявку с указанием в комментарии:\n"
+                    "• ФИО: [Фамилия Имя]\n"  
+                    "• Год: [год выпуска]\n"
+                    "• Класс: [номер]\n\n"
+                    "Пример:\n"
+                    "ФИО: Иван Петров\n"
+                    "Год: 2015\n"
+                    "Класс: 3\n\n"
+                    "Админ: Сергей Федоров, 1983-2"
+                )
+                await telegram_app.bot.set_chat_description(chat_id=GROUP_ID, description=description)
+                logger.info(f"Group description updated for {GROUP_ID}")
+            except Exception as e:
+                logger.warning(f"Could not update group description: {e}")
+                
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
 
