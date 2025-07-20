@@ -230,8 +230,13 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             pass
 
 # Telegram application
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
-telegram_app.add_handler(ChatJoinRequestHandler(handle_join_request))
+try:
+    telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+    telegram_app.add_handler(ChatJoinRequestHandler(handle_join_request))
+    logger.info("Telegram application initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Telegram application: {e}")
+    raise
 
 # Flask endpoint for Telegram webhook
 @app.route("/", methods=["POST"])
