@@ -225,6 +225,11 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info(f"Bio present: {bio is not None}, Bio content: '{text}'")
         logger.info(f"Expected GROUP_ID: {GROUP_ID}, Actual chat_id: {chat_id}")
         
+        # Временно отключаем проверку GROUP_ID для отладки
+        if GROUP_ID != 0 and GROUP_ID != chat_id:
+            logger.warning(f"GROUP_ID mismatch! Expected: {GROUP_ID}, Got: {chat_id}")
+            logger.info("Continuing processing for debugging purposes...")
+        
         # Если bio отсутствует, отклоняем и отправляем инструкции
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio provided")
