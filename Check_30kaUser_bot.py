@@ -20,23 +20,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Вспомогательная функция для безопасного получения переменных окружения
+def get_env_var(var_name, default=None, var_type=str):
+    """
+    Безопасно получает переменную окружения с обработкой пустых строк
+    """
+    value = os.environ.get(var_name)
+    if not value or value.strip() == "":
+        if default is not None:
+            return var_type(default)
+        return None
+    
+    try:
+        return var_type(value.strip())
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Invalid value for {var_name}: {value}. Using default: {default}")
+        return var_type(default) if default is not None else None
+
 # Настройки из окружения
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-DB_HOST = os.environ.get("DB_HOST")
-DB_PORT = int(os.environ.get("DB_PORT", 3306))
-DB_NAME = os.environ.get("DB_NAME")
-DB_USER = os.environ.get("DB_USER")
-DB_PASSWORD = os.environ.get("DB_PASSWORD")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-GROUP_ID = int(os.environ.get("GROUP_ID", 0))
-PORT = int(os.environ.get("PORT", 10000))
+BOT_TOKEN = get_env_var("BOT_TOKEN")
+DB_HOST = get_env_var("DB_HOST")
+DB_PORT = get_env_var("DB_PORT", 3306, int)
+DB_NAME = get_env_var("DB_NAME")
+DB_USER = get_env_var("DB_USER")
+DB_PASSWORD = get_env_var("DB_PASSWORD")
+WEBHOOK_URL = get_env_var("WEBHOOK_URL")
+GROUP_ID = get_env_var("GROUP_ID", 0, int)
+PORT = get_env_var("PORT", 10000, int)
 
 # Проверяем наличие обязательных переменных
-required_vars = ["BOT_TOKEN", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD", "WEBHOOK_URL"]
-missing_vars = [var for var in required_vars if not os.environ.get(var)]
+required_values = {
+    "BOT_TOKEN": BOT_TOKEN,
+    "DB_HOST": DB_HOST,
+    "DB_NAME": DB_NAME,
+    "DB_USER": DB_USER,
+    "DB_PASSWORD": DB_PASSWORD,
+    "WEBHOOK_URL": WEBHOOK_URL
+}
+missing_vars = [var for var, value in required_values.items() if not value]
 if missing_vars:
-    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    logger.error(f"Missing or empty required environment variables: {', '.join(missing_vars)}")
+    raise ValueError(f"Missing or empty required environment variables: {', '.join(missing_vars)}")
 
 # Flask-приложение
 app = Flask(__name__)
