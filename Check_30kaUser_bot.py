@@ -259,6 +259,16 @@ async def setup_webhook():
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
 
+# Функция инициализации для production
+def init_app():
+    """Инициализация приложения для production"""
+    import asyncio
+    try:
+        asyncio.run(setup_webhook())
+        logger.info("Application initialized for production")
+    except Exception as e:
+        logger.error(f"Failed to initialize application: {e}")
+
 # Запуск
 if __name__ == "__main__":
     import asyncio
@@ -266,5 +276,8 @@ if __name__ == "__main__":
     # Устанавливаем webhook при запуске
     asyncio.run(setup_webhook())
     
-    logger.info("Starting Flask application")
+    logger.info("Starting Flask application in development mode")
     app.run(host="0.0.0.0", port=PORT, debug=False)
+else:
+    # Production mode - инициализируем при импорте
+    init_app()
