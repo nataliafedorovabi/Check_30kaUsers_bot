@@ -392,25 +392,17 @@ async def setup_webhook():
         await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/")
         logger.info(f"Webhook set to {WEBHOOK_URL}/")
         
-        # Попробуем настроить описание группы
-        if GROUP_ID != 0:
-            try:
-                description = (
-                    "🎓 Чат выпускников школы №30\n\n"
-                    "Для вступления подайте заявку с указанием в комментарии:\n"
-                    "• ФИО: [Фамилия Имя]\n"  
-                    "• Год: [год выпуска]\n"
-                    "• Класс: [номер]\n\n"
-                    "Пример:\n"
-                    "ФИО: Иван Петров\n"
-                    "Год: 2015\n"
-                    "Класс: 3\n\n"
-                    "Админ: Сергей Федоров, 1983-2"
-                )
-                await telegram_app.bot.set_chat_description(chat_id=GROUP_ID, description=description)
-                logger.info(f"Group description updated for {GROUP_ID}")
-            except Exception as e:
-                logger.warning(f"Could not update group description: {e}")
+        # Автоматическое обновление описания группы отключено
+        # Чтобы включить - раскомментируйте код ниже и установите правильный GROUP_ID
+        # if GROUP_ID != 0:
+        #     try:
+        #         description = "🎓 Чат выпускников школы №30..."
+        #         await telegram_app.bot.set_chat_description(chat_id=GROUP_ID, description=description)
+        #         logger.info(f"Group description updated for {GROUP_ID}")
+        #     except Exception as e:
+        #         logger.warning(f"Could not update group description: {e}")
+        
+        logger.info("Automatic group description update is disabled")
                 
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
