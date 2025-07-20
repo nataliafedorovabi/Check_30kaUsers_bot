@@ -204,9 +204,11 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Обрабатывает заявку на вступление в группу"""
     try:
         user_id = update.chat_join_request.from_user.id
+        chat_id = update.chat_join_request.chat.id
         text = update.chat_join_request.bio or ""
         
-        logger.info(f"Processing join request from user {user_id} with bio: {text}")
+        logger.info(f"Processing join request from user {user_id} in chat {chat_id} with bio: {text}")
+        logger.info(f"Expected GROUP_ID: {GROUP_ID}, Actual chat_id: {chat_id}")
         
         fio, year, klass = parse_text(text)
 
@@ -247,8 +249,30 @@ except Exception as e:
 def webhook():
     """Webhook endpoint для получения обновлений от Telegram"""
     try:
-        update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-        telegram_app.update_queue.put(update)
+        json_data = request.get_json(force=True)
+        logger.info(f"Received webhook data: {json_data}")
+        
+        update = Update.de_json(json_data, telegram_app.bot)
+        logger.info(f"Parsed update: {update}")
+        
+        # Обрабатываем update напрямую
+        if update.chat_join_request:
+            import asyncio
+            from telegram.ext import ContextTypes
+            
+            async def process_join_request():
+                context = ContextTypes.DEFAULT_TYPE()
+                await handle_join_request(update, context)
+            
+            # Запускаем в новом event loop
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            loop.create_task(process_join_request())
+        
         return "ok"
     except Exception as e:
         logger.error(f"Webhook error: {e}")
