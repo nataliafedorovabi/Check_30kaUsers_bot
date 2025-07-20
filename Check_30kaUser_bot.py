@@ -44,6 +44,7 @@ DB_PORT = get_env_var("DB_PORT", 3306, int)
 DB_NAME = get_env_var("DB_NAME")
 DB_USER = get_env_var("DB_USER")
 DB_PASSWORD = get_env_var("DB_PASSWORD")
+DB_TABLE = get_env_var("DB_TABLE", "users")  # Имя таблицы с выпускниками
 WEBHOOK_URL = get_env_var("WEBHOOK_URL")
 GROUP_ID = get_env_var("GROUP_ID", 0, int)
 PORT = get_env_var("PORT", 10000, int)
@@ -144,10 +145,9 @@ def check_user(fio, year, klass):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    "SELECT fio FROM users WHERE year = %s AND klass = %s", 
-                    (formatted_year, formatted_class)
-                )
+                # Используем f-строку для имени таблицы (безопасно, так как имя контролируется нами)
+                query = f"SELECT fio FROM {DB_TABLE} WHERE year = %s AND klass = %s"
+                cursor.execute(query, (formatted_year, formatted_class))
                 rows = cursor.fetchall()
                 
                 for row in rows:
