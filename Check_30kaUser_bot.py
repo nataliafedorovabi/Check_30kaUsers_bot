@@ -497,6 +497,17 @@ async def setup_webhook():
         logger.info("Automatic group description update is disabled")
         logger.info(f"Current GROUP_ID setting: {GROUP_ID}")
         logger.info(f"Bot will process requests from any group for debugging")
+        
+        # Проверяем настройки группы
+        if GROUP_ID != 0:
+            try:
+                chat_info = await telegram_app.bot.get_chat(chat_id=GROUP_ID)
+                logger.info(f"Group info: {chat_info}")
+                logger.info(f"Group type: {chat_info.type}")
+                logger.info(f"Join by request: {getattr(chat_info, 'join_by_request', 'Not available')}")
+                logger.info(f"Has protected content: {getattr(chat_info, 'has_protected_content', 'Not available')}")
+            except Exception as e:
+                logger.warning(f"Could not get group info: {e}")
                 
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
