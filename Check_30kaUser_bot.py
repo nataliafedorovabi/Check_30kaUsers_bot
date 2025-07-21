@@ -1,7 +1,8 @@
 import os
 import asyncio
 import threading
-import pymysql
+import psycopg2
+import psycopg2.extras
 import logging
 from contextlib import contextmanager
 from flask import Flask, request
@@ -41,8 +42,10 @@ def get_env_var(var_name, default=None, var_type=str):
 # Конфигурация из окружения
 class Config:
     BOT_TOKEN = get_env_var("BOT_TOKEN")
+    # PostgreSQL конфигурация - поддерживаем как отдельные параметры, так и DATABASE_URL
+    DATABASE_URL = get_env_var("DATABASE_URL")  # Render предоставляет полный URL
     DB_HOST = get_env_var("DB_HOST")
-    DB_PORT = get_env_var("DB_PORT", 3306, int)
+    DB_PORT = get_env_var("DB_PORT", 5432, int)  # PostgreSQL порт по умолчанию
     DB_NAME = get_env_var("DB_NAME")
     DB_USER = get_env_var("DB_USER")
     DB_PASSWORD = get_env_var("DB_PASSWORD")
@@ -53,7 +56,13 @@ class Config:
     ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
 
 # Проверяем наличие обязательных переменных
-required_vars = ["BOT_TOKEN", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD", "WEBHOOK_URL"]
+required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
+if Config.DATABASE_URL:
+    logger.info("Using DATABASE_URL for database connection")
+else:
+    required_vars.extend(["DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"])
+    logger.info("Using individual database parameters")
+
 missing_vars = [var for var in required_vars if not getattr(Config, var)]
 if missing_vars:
     logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
@@ -97,34 +106,45 @@ def run_async_in_thread(async_func, timeout=30):
 # База данных
 @contextmanager
 def get_db_connection():
-    """Контекстный менеджер для подключения к БД"""
+    """Контекстный менеджер для подключения к PostgreSQL"""
     conn = None
     try:
-        logger.info(f"Connecting to database: {Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}")
-        conn = pymysql.connect(
-            host=Config.DB_HOST,
-            port=Config.DB_PORT,
-            user=Config.DB_USER,
-            password=Config.DB_PASSWORD,
-            database=Config.DB_NAME,
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor,
-            connect_timeout=10,
-            read_timeout=10,
-            write_timeout=10,
-            autocommit=True,
-            ssl_disabled=True  # Отключаем SSL для совместимости с некоторыми хостингами
-        )
-        logger.info("✅ Database connection successful")
+        if Config.DATABASE_URL:
+            logger.info(f"Connecting to PostgreSQL using DATABASE_URL")
+            conn = psycopg2.connect(
+                Config.DATABASE_URL,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=10,
+                sslmode='require'  # Render требует SSL
+            )
+        else:
+            logger.info(f"Connecting to PostgreSQL: {Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}")
+            conn = psycopg2.connect(
+                host=Config.DB_HOST,
+                port=Config.DB_PORT,
+                user=Config.DB_USER,
+                password=Config.DB_PASSWORD,
+                database=Config.DB_NAME,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=10,
+                sslmode='prefer'
+            )
+        
+        conn.autocommit = True  # Включаем автокоммит
+        logger.info("✅ PostgreSQL connection successful")
         yield conn
+        
     except Exception as e:
-        logger.error(f"❌ Database connection error: {e}")
-        logger.error(f"Connection details - Host: {Config.DB_HOST}, Port: {Config.DB_PORT}, DB: {Config.DB_NAME}, User: {Config.DB_USER}")
+        logger.error(f"❌ PostgreSQL connection error: {e}")
+        if Config.DATABASE_URL:
+            logger.error("Connection via DATABASE_URL failed")
+        else:
+            logger.error(f"Connection details - Host: {Config.DB_HOST}, Port: {Config.DB_PORT}, DB: {Config.DB_NAME}, User: {Config.DB_USER}")
         raise
     finally:
         if conn:
             conn.close()
-            logger.info("Database connection closed")
+            logger.info("PostgreSQL connection closed")
 
 # Утилиты для работы с данными
 def normalize_fio(raw_fio):
@@ -220,15 +240,16 @@ def check_user(fio, year, klass):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                # PostgreSQL использует %s для всех типов параметров
                 query = f"SELECT fio FROM {Config.DB_TABLE} WHERE year = %s AND klass = %s"
-                logger.info(f"🗃️ Executing query: {query}")
+                logger.info(f"🗃️ Executing PostgreSQL query: {query}")
                 logger.info(f"📊 Query parameters: year={formatted_year}, klass={formatted_class}")
                 logger.info(f"📋 Using table: {Config.DB_TABLE}")
                 
                 cursor.execute(query, (formatted_year, formatted_class))
                 rows = cursor.fetchall()
                 
-                logger.info(f"📈 Found {len(rows)} records in database for year {formatted_year}, class {formatted_class}")
+                logger.info(f"📈 Found {len(rows)} records in PostgreSQL for year {formatted_year}, class {formatted_class}")
                 
                 if rows:
                     logger.info("👥 Database records found:")
@@ -553,68 +574,77 @@ def webhook():
 
 # Database connection testing
 def test_database_connection():
-    """Тестирует разные варианты подключения к БД"""
-    logger.info("🧪 Testing database connection with different parameters...")
+    """Тестирует разные варианты подключения к PostgreSQL"""
+    logger.info("🧪 Testing PostgreSQL connection with different parameters...")
     
-    connection_params = [
-        {
-            "name": "Standard connection",
+    connection_params = []
+    
+    # Если есть DATABASE_URL, тестируем его
+    if Config.DATABASE_URL:
+        connection_params.append({
+            "name": "DATABASE_URL connection",
             "params": {
-                "host": Config.DB_HOST,
-                "port": Config.DB_PORT,
-                "user": Config.DB_USER,
-                "password": Config.DB_PASSWORD,
-                "database": Config.DB_NAME,
-                "charset": 'utf8mb4',
+                "dsn": Config.DATABASE_URL,
+                "cursor_factory": psycopg2.extras.RealDictCursor,
                 "connect_timeout": 10,
-                "ssl_disabled": True
+                "sslmode": 'require'
             }
-        },
-        {
-            "name": "Connection with SSL",
-            "params": {
-                "host": Config.DB_HOST,
-                "port": Config.DB_PORT,
-                "user": Config.DB_USER,
-                "password": Config.DB_PASSWORD,
-                "database": Config.DB_NAME,
-                "charset": 'utf8mb4',
-                "connect_timeout": 10,
-                "ssl": {'check_hostname': False, 'verify_mode': 0}
+        })
+    
+    # Если есть отдельные параметры, тестируем их
+    if Config.DB_HOST:
+        connection_params.extend([
+            {
+                "name": "Individual parameters with SSL required",
+                "params": {
+                    "host": Config.DB_HOST,
+                    "port": Config.DB_PORT,
+                    "user": Config.DB_USER,
+                    "password": Config.DB_PASSWORD,
+                    "database": Config.DB_NAME,
+                    "cursor_factory": psycopg2.extras.RealDictCursor,
+                    "connect_timeout": 10,
+                    "sslmode": 'require'
+                }
+            },
+            {
+                "name": "Individual parameters with SSL preferred",
+                "params": {
+                    "host": Config.DB_HOST,
+                    "port": Config.DB_PORT,
+                    "user": Config.DB_USER,
+                    "password": Config.DB_PASSWORD,
+                    "database": Config.DB_NAME,
+                    "cursor_factory": psycopg2.extras.RealDictCursor,
+                    "connect_timeout": 10,
+                    "sslmode": 'prefer'
+                }
             }
-        },
-        {
-            "name": "Connection without database specified",
-            "params": {
-                "host": Config.DB_HOST,
-                "port": Config.DB_PORT,
-                "user": Config.DB_USER,
-                "password": Config.DB_PASSWORD,
-                "charset": 'utf8mb4',
-                "connect_timeout": 5,
-                "ssl_disabled": True
-            }
-        }
-    ]
+        ])
     
     for test in connection_params:
         try:
             logger.info(f"🔌 Testing: {test['name']}")
-            conn = pymysql.connect(**test['params'])
+            if 'dsn' in test['params']:
+                # Подключение через DATABASE_URL
+                dsn = test['params'].pop('dsn')
+                conn = psycopg2.connect(dsn, **test['params'])
+            else:
+                # Подключение через отдельные параметры
+                conn = psycopg2.connect(**test['params'])
+                
             logger.info(f"✅ {test['name']} - SUCCESS!")
             
-            # Если подключились без указания БД, проверяем доступные базы
-            if 'database' not in test['params']:
-                with conn.cursor() as cursor:
-                    cursor.execute("SHOW DATABASES")
-                    databases = cursor.fetchall()
-                    db_names = [db[0] for db in databases]
-                    logger.info(f"📋 Available databases: {db_names}")
-                    
-                    if Config.DB_NAME in db_names:
-                        logger.info(f"✅ Target database '{Config.DB_NAME}' found")
-                    else:
-                        logger.error(f"❌ Target database '{Config.DB_NAME}' not found")
+            # Проверяем версию PostgreSQL и доступные схемы
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT version()")
+                version = cursor.fetchone()[0]
+                logger.info(f"📊 PostgreSQL version: {version}")
+                
+                cursor.execute("SELECT schema_name FROM information_schema.schemata")
+                schemas = cursor.fetchall()
+                schema_names = [schema[0] for schema in schemas]
+                logger.info(f"📋 Available schemas: {schema_names}")
             
             conn.close()
             return True
@@ -632,10 +662,14 @@ def verify_database():
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # Проверяем существование таблицы
-                cursor.execute("SHOW TABLES")
+                # Проверяем существование таблицы (PostgreSQL синтаксис)
+                cursor.execute("""
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'public'
+                """)
                 tables = cursor.fetchall()
-                table_names = [list(table.values())[0] for table in tables]
+                table_names = [table['table_name'] for table in tables]
                 
                 logger.info(f"📋 Available tables: {table_names}")
                 
@@ -645,17 +679,22 @@ def verify_database():
                 
                 logger.info(f"✅ Table '{Config.DB_TABLE}' exists")
                 
-                # Проверяем структуру таблицы
-                cursor.execute(f"DESCRIBE {Config.DB_TABLE}")
+                # Проверяем структуру таблицы (PostgreSQL синтаксис)
+                cursor.execute(f"""
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns 
+                    WHERE table_name = %s AND table_schema = 'public'
+                    ORDER BY ordinal_position
+                """, (Config.DB_TABLE,))
                 columns = cursor.fetchall()
                 
                 logger.info(f"📊 Table '{Config.DB_TABLE}' structure:")
                 for col in columns:
-                    logger.info(f"  - {col['Field']}: {col['Type']} (Null: {col['Null']}, Key: {col['Key']})")
+                    logger.info(f"  - {col['column_name']}: {col['data_type']} (Nullable: {col['is_nullable']}, Default: {col['column_default']})")
                 
                 # Проверяем наличие необходимых полей
                 required_fields = ['fio', 'year', 'klass']
-                column_names = [col['Field'] for col in columns]
+                column_names = [col['column_name'] for col in columns]
                 
                 missing_fields = [field for field in required_fields if field not in column_names]
                 if missing_fields:
@@ -693,8 +732,10 @@ def verify_database():
 async def setup_webhook():
     """Устанавливает webhook для бота"""
     try:
-        # Логируем настройки БД (без пароля)
-        logger.info("🔧 Database configuration:")
+        # Логируем настройки PostgreSQL (без пароля)
+        logger.info("🔧 PostgreSQL configuration:")
+        if Config.DATABASE_URL:
+            logger.info(f"  DATABASE_URL: {Config.DATABASE_URL[:50]}...{Config.DATABASE_URL[-20:] if len(Config.DATABASE_URL) > 70 else Config.DATABASE_URL}")
         logger.info(f"  Host: {Config.DB_HOST}")
         logger.info(f"  Port: {Config.DB_PORT}")
         logger.info(f"  Database: {Config.DB_NAME}")
