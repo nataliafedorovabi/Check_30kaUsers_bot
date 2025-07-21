@@ -475,7 +475,46 @@ def webhook():
         elif update.callback_query:
             # Обрабатываем нажатия на кнопки
             logger.info("Processing callback query")
-            await handle_callback_query(update, telegram_app)
+            
+            async def process_callback():
+                try:
+                    await handle_callback_query(update, telegram_app)
+                except Exception as e:
+                    logger.error(f"Error in process_callback: {e}")
+            
+            # Запускаем в отдельном потоке
+            def run_callback():
+                try:
+                    import threading
+                    result = []
+                    error = []
+                    
+                    def thread_worker():
+                        try:
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            new_loop.run_until_complete(process_callback())
+                            new_loop.close()
+                            result.append("success")
+                        except Exception as e:
+                            error.append(str(e))
+                            logger.error(f"Error in callback thread_worker: {e}")
+                    
+                    thread = threading.Thread(target=thread_worker)
+                    thread.start()
+                    thread.join(timeout=10)  # Ждем максимум 10 секунд
+                    
+                    if error:
+                        logger.error(f"Callback processing failed: {error[0]}")
+                    elif result:
+                        logger.info("Callback processed successfully")
+                    else:
+                        logger.warning("Callback processing timed out")
+                        
+                except Exception as e:
+                    logger.error(f"Error in run_callback: {e}")
+            
+            run_callback()
         elif update.message and update.message.chat.type.name == 'PRIVATE':
             # Обрабатываем личные сообщения с данными пользователя
             logger.info("Processing private message with user data")
