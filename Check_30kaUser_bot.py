@@ -100,6 +100,7 @@ def get_db_connection():
     """Контекстный менеджер для подключения к БД"""
     conn = None
     try:
+        logger.info(f"Connecting to database: {Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}")
         conn = pymysql.connect(
             host=Config.DB_HOST,
             port=Config.DB_PORT,
@@ -109,13 +110,16 @@ def get_db_connection():
             charset='utf8mb4',
             cursorclass=pymysql.cursors.DictCursor
         )
+        logger.info("✅ Database connection successful")
         yield conn
     except Exception as e:
-        logger.error(f"Database connection error: {e}")
+        logger.error(f"❌ Database connection error: {e}")
+        logger.error(f"Connection details - Host: {Config.DB_HOST}, Port: {Config.DB_PORT}, DB: {Config.DB_NAME}, User: {Config.DB_USER}")
         raise
     finally:
         if conn:
             conn.close()
+            logger.info("Database connection closed")
 
 # Утилиты для работы с данными
 def normalize_fio(raw_fio):
@@ -188,37 +192,58 @@ def parse_text(text):
 
 def check_user(fio, year, klass):
     """Проверяет наличие пользователя в БД"""
+    logger.info(f"🔍 Starting user verification - FIO: '{fio}', Year: '{year}', Class: '{klass}'")
+    
     if not (fio and year and klass):
+        logger.warning("❌ Invalid input data - missing required fields")
         return False
         
     fio_set = normalize_fio(fio)
     if not fio_set:
+        logger.warning("❌ Invalid FIO format after normalization")
         return False
     
     formatted_year = format_for_db(year, "year")
     formatted_class = format_for_db(klass, "class")
     
+    logger.info(f"📝 Normalized data - FIO parts: {fio_set}, Year: {formatted_year}, Class: {formatted_class}")
+    
     if not (formatted_year and formatted_class):
+        logger.warning("❌ Invalid year or class format for database")
         return False
     
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 query = f"SELECT fio FROM {Config.DB_TABLE} WHERE year = %s AND klass = %s"
+                logger.info(f"🗃️ Executing query: {query}")
+                logger.info(f"📊 Query parameters: year={formatted_year}, klass={formatted_class}")
+                logger.info(f"📋 Using table: {Config.DB_TABLE}")
+                
                 cursor.execute(query, (formatted_year, formatted_class))
                 rows = cursor.fetchall()
                 
+                logger.info(f"📈 Found {len(rows)} records in database for year {formatted_year}, class {formatted_class}")
+                
+                if rows:
+                    logger.info("👥 Database records found:")
+                    for i, row in enumerate(rows, 1):
+                        logger.info(f"  {i}. {row['fio']}")
+                
                 for row in rows:
                     db_fio_set = normalize_fio(row['fio'])
+                    logger.info(f"🔄 Comparing: input={fio_set} vs db={db_fio_set}")
+                    
                     if fio_set.issubset(db_fio_set) or db_fio_set.issubset(fio_set):
-                        logger.info(f"User found: {fio} -> {row['fio']}")
+                        logger.info(f"✅ MATCH FOUND! User verified: '{fio}' matches '{row['fio']}'")
                         return True
                         
     except Exception as e:
-        logger.error(f"Error checking user: {e}")
+        logger.error(f"❌ Database query error: {e}")
+        logger.error(f"Query details - Table: {Config.DB_TABLE}, Year: {formatted_year}, Class: {formatted_class}")
         return False
     
-    logger.info(f"User not found: {fio}, {year}, {klass}")
+    logger.info(f"❌ NO MATCH: User '{fio}' not found in {Config.DB_TABLE} for year {formatted_year}, class {formatted_class}")
     return False
 
 # Telegram утилиты
@@ -521,10 +546,79 @@ def webhook():
         logger.error(f"Webhook error: {e}")
         return "error", 500
 
+# Database verification
+def verify_database():
+    """Проверяет подключение к базе данных и структуру таблицы"""
+    logger.info("🔍 Verifying database connection and table structure...")
+    
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # Проверяем существование таблицы
+                cursor.execute("SHOW TABLES")
+                tables = cursor.fetchall()
+                table_names = [list(table.values())[0] for table in tables]
+                
+                logger.info(f"📋 Available tables: {table_names}")
+                
+                if Config.DB_TABLE not in table_names:
+                    logger.error(f"❌ Table '{Config.DB_TABLE}' not found in database!")
+                    return False
+                
+                logger.info(f"✅ Table '{Config.DB_TABLE}' exists")
+                
+                # Проверяем структуру таблицы
+                cursor.execute(f"DESCRIBE {Config.DB_TABLE}")
+                columns = cursor.fetchall()
+                
+                logger.info(f"📊 Table '{Config.DB_TABLE}' structure:")
+                for col in columns:
+                    logger.info(f"  - {col['Field']}: {col['Type']} (Null: {col['Null']}, Key: {col['Key']})")
+                
+                # Проверяем наличие необходимых полей
+                required_fields = ['fio', 'year', 'klass']
+                column_names = [col['Field'] for col in columns]
+                
+                missing_fields = [field for field in required_fields if field not in column_names]
+                if missing_fields:
+                    logger.error(f"❌ Missing required fields: {missing_fields}")
+                    return False
+                
+                logger.info("✅ All required fields present")
+                
+                # Проверяем количество записей
+                cursor.execute(f"SELECT COUNT(*) as count FROM {Config.DB_TABLE}")
+                count_result = cursor.fetchone()
+                total_records = count_result['count']
+                
+                logger.info(f"📈 Total records in table: {total_records}")
+                
+                # Показываем несколько примеров записей
+                cursor.execute(f"SELECT fio, year, klass FROM {Config.DB_TABLE} LIMIT 5")
+                sample_rows = cursor.fetchall()
+                
+                if sample_rows:
+                    logger.info("📝 Sample records:")
+                    for i, row in enumerate(sample_rows, 1):
+                        logger.info(f"  {i}. FIO: {row['fio']}, Year: {row['year']}, Class: {row['klass']}")
+                else:
+                    logger.warning("⚠️ No records found in table")
+                
+                logger.info("✅ Database verification completed successfully")
+                return True
+                
+    except Exception as e:
+        logger.error(f"❌ Database verification failed: {e}")
+        return False
+
 # Setup
 async def setup_webhook():
     """Устанавливает webhook для бота"""
     try:
+        # Проверяем базу данных перед запуском
+        if not verify_database():
+            logger.error("❌ Database verification failed - bot may not work correctly")
+        
         await telegram_app.bot.set_webhook(f"{Config.WEBHOOK_URL}/")
         logger.info(f"Webhook set to {Config.WEBHOOK_URL}/")
         logger.info(f"Bot configured for GROUP_ID: {Config.GROUP_ID}")
