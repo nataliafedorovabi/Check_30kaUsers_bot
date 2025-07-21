@@ -525,12 +525,34 @@ def webhook():
             
             # Проверяем команды
             if text.strip().lower() == '/start':
-                await start_step_input(user_id, telegram_app)
+                def run_start():
+                    try:
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        new_loop.run_until_complete(start_step_input(user_id, telegram_app))
+                        new_loop.close()
+                    except Exception as e:
+                        logger.error(f"Error in start command: {e}")
+                
+                import threading
+                thread = threading.Thread(target=run_start)
+                thread.start()
                 return "ok"
             
             # Проверяем состояние пошагового ввода
             if user_id in user_states:
-                await handle_step_input(user_id, text, telegram_app)
+                def run_step():
+                    try:
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        new_loop.run_until_complete(handle_step_input(user_id, text, telegram_app))
+                        new_loop.close()
+                    except Exception as e:
+                        logger.error(f"Error in step input: {e}")
+                
+                import threading
+                thread = threading.Thread(target=run_step)
+                thread.start()
                 return "ok"
             
             # Парсим данные (умный парсинг + формат с двоеточиями)
