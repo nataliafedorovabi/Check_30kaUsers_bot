@@ -73,6 +73,9 @@ app = Flask(__name__)
 # Whitelist проверенных пользователей (временное хранение)
 verified_users = set()
 
+# Состояния пошагового ввода
+user_states = {}  # {user_id: {'step': 'waiting_name'/'waiting_year'/'waiting_class', 'data': {...}}}
+
 # Контекстный менеджер для подключения к БД
 @contextmanager
 def get_db_connection():
@@ -181,7 +184,8 @@ def parse_text(text):
     """
     if not text:
         return None, None, None
-        
+    
+    # Формат с двоеточиями
     lines = text.split('\n')
     data = {}
     
@@ -200,7 +204,33 @@ def parse_text(text):
             elif key_lower in ['класс', 'class', 'группа']:
                 data['класс'] = val_clean
     
-    return data.get('фио'), data.get('год'), data.get('класс')
+    if data.get('фио') and data.get('год') and data.get('класс'):
+        return data.get('фио'), data.get('год'), data.get('класс')
+    
+    # Умный парсинг строки "Федоров Сергей 2010 2"
+    parts = text.strip().split()
+    if len(parts) >= 3:
+        # Ищем год (4 цифры) и класс (1-2 цифры)
+        year_part = None
+        class_part = None
+        name_parts = []
+        
+        for part in parts:
+            if part.isdigit():
+                if len(part) == 4 and 1950 <= int(part) <= 2030:  # Год
+                    year_part = part
+                elif len(part) in [1, 2] and 1 <= int(part) <= 11:  # Класс
+                    class_part = part
+                else:
+                    name_parts.append(part)
+            else:
+                name_parts.append(part)
+        
+        if year_part and class_part and len(name_parts) >= 2:
+            fio = ' '.join(name_parts)
+            return fio, year_part, class_part
+    
+    return None, None, None
 
 # Обработка заявки
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -435,7 +465,17 @@ def webhook():
             
             logger.info(f"Received private message from {user_id}: {text}")
             
-            # Парсим данные
+            # Проверяем команды
+            if text.strip().lower() == '/start':
+                await start_step_input(user_id, telegram_app)
+                return "ok"
+            
+            # Проверяем состояние пошагового ввода
+            if user_id in user_states:
+                await handle_step_input(user_id, text, telegram_app)
+                return "ok"
+            
+            # Парсим данные (умный парсинг + формат с двоеточиями)
             fio, year, klass = parse_text(text)
             
             if fio and year and klass:
@@ -460,11 +500,16 @@ def webhook():
                         f"Проверьте правильность данных или обратитесь к администратору."
                     )
             else:
+                # Предлагаем пошаговый ввод
                 response = (
-                    "Неполные данные! Пожалуйста, отправьте в формате:\n\n"
+                    "Неполные данные!\n\n"
+                    "Вы можете отправить данные в любом из форматов:\n\n"
+                    "1️⃣ Одной строкой: Федоров Сергей 2010 2\n\n"
+                    "2️⃣ С двоеточиями:\n"
                     "ФИО: Ваше Имя Фамилия\n"
                     "Год: 2015\n"
-                    "Класс: 3"
+                    "Класс: 3\n\n"
+                    "3️⃣ Или отправьте /start для пошагового ввода"
                 )
             
             # Отправляем ответ
@@ -499,6 +544,98 @@ def webhook():
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return "error", 500
+
+# Пошаговый ввод данных
+async def handle_step_input(user_id, text, telegram_app):
+    """Обрабатывает пошаговый ввод данных пользователя"""
+    try:
+        state = user_states[user_id]
+        step = state['step']
+        
+        if text.strip().lower() == '/cancel':
+            del user_states[user_id]
+            response = "Ввод данных отменен. Отправьте /start чтобы начать заново."
+        elif step == 'waiting_name':
+            # Проверяем что введено имя и фамилия
+            name_parts = text.strip().split()
+            if len(name_parts) >= 2:
+                state['data']['fio'] = text.strip()
+                state['step'] = 'waiting_year'
+                response = "Отлично! Теперь введите год окончания школы (например: 2015):"
+            else:
+                response = "Пожалуйста, введите имя и фамилию (например: Иван Петров):"
+        elif step == 'waiting_year':
+            # Проверяем год
+            if text.strip().isdigit() and 1950 <= int(text.strip()) <= 2030:
+                state['data']['year'] = text.strip()
+                state['step'] = 'waiting_class'
+                response = "Хорошо! Теперь введите номер класса (1-11):"
+            else:
+                response = "Пожалуйста, введите корректный год (например: 2015):"
+        elif step == 'waiting_class':
+            # Проверяем класс
+            if text.strip().isdigit() and 1 <= int(text.strip()) <= 11:
+                state['data']['class'] = text.strip()
+                
+                # Проверяем пользователя в базе
+                fio = state['data']['fio']
+                year = state['data']['year']
+                klass = state['data']['class']
+                
+                if check_user(fio, year, klass):
+                    verified_users.add(user_id)
+                    response = (
+                        f"✅ Отлично! Вы найдены в базе выпускников:\n"
+                        f"ФИО: {fio}\n"
+                        f"Год: {year}\n"
+                        f"Класс: {klass}\n\n"
+                        f"Теперь подайте заявку на вступление в группу - она будет одобрена автоматически.\n\n"
+                        f"Ссылка на группу: https://t.me/test_bots_nf"
+                    )
+                else:
+                    response = (
+                        f"❌ К сожалению, в базе не найден:\n"
+                        f"ФИО: {fio}\n"
+                        f"Год: {year}\n"
+                        f"Класс: {klass}\n\n"
+                        f"Проверьте правильность данных или обратитесь к администратору."
+                    )
+                
+                # Удаляем состояние
+                del user_states[user_id]
+            else:
+                response = "Пожалуйста, введите корректный номер класса (1-11):"
+        
+        # Отправляем ответ
+        await send_message(user_id, response, telegram_app)
+        
+    except Exception as e:
+        logger.error(f"Error in step input: {e}")
+        if user_id in user_states:
+            del user_states[user_id]
+
+async def start_step_input(user_id, telegram_app):
+    """Начинает пошаговый ввод данных"""
+    user_states[user_id] = {
+        'step': 'waiting_name',
+        'data': {}
+    }
+    response = (
+        "👋 Привет! Давайте введем ваши данные пошагово.\n\n"
+        "Введите ваше имя и фамилию (например: Иван Петров):\n\n"
+        "Отправьте /cancel чтобы отменить."
+    )
+    await send_message(user_id, response, telegram_app)
+
+async def send_message(user_id, text, telegram_app):
+    """Отправляет сообщение пользователю"""
+    try:
+        from telegram.ext import CallbackContext
+        context = CallbackContext(application=telegram_app)
+        await context.bot.send_message(chat_id=user_id, text=text)
+        logger.info(f"Sent message to user {user_id}")
+    except Exception as e:
+        logger.error(f"Error sending message to {user_id}: {e}")
 
 # Установка webhook
 async def setup_webhook():
