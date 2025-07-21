@@ -77,16 +77,31 @@ user_states = {}  # Состояния пошагового ввода
 
 # Утилиты для работы с асинхронностью
 def run_async_in_thread(async_func, timeout=30):
+    """Запускает асинхронную функцию в отдельном потоке"""
+    result = []
+    error = []
+    
     def thread_worker():
         try:
-            asyncio.run(async_func())  # безопасный способ запуска корутины
-            logger.info("Async processing completed successfully")
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            new_loop.run_until_complete(async_func())
+            new_loop.close()
+            result.append("success")
         except Exception as e:
+            error.append(str(e))
             logger.error(f"Error in async thread: {e}")
-
+    
     thread = threading.Thread(target=thread_worker)
     thread.start()
     thread.join(timeout=timeout)
+    
+    if error:
+        logger.error(f"Async processing failed: {error[0]}")
+    elif result:
+        logger.info("Async processing completed successfully")
+    else:
+        logger.warning(f"Async processing timed out after {timeout}s")
 
 # База данных
 @contextmanager
@@ -264,13 +279,15 @@ async def send_message(user_id, text, context_or_app, reply_markup=None):
     """Универсальная отправка сообщений"""
     try:
         # Определяем тип объекта и получаем bot
-        if hasattr(context_or_app, 'bot'):  # Context
+        bot = None
+        if hasattr(context_or_app, 'bot'):
             bot = context_or_app.bot
-        elif hasattr(context_or_app, '_bot'):  # Application
+        elif hasattr(context_or_app, '_bot'):
             bot = context_or_app._bot
-        else:  # Предполагаем что это bot
+        elif hasattr(context_or_app, 'send_message'):
             bot = context_or_app
-        
+        else:
+            raise ValueError("Не удалось определить объект бота для отправки сообщения")
         await bot.send_message(
             chat_id=user_id, 
             text=text,
@@ -280,44 +297,40 @@ async def send_message(user_id, text, context_or_app, reply_markup=None):
     except Exception as e:
         logger.error(f"Error sending message to {user_id}: {e}")
 
+# === ТЕКСТОВЫЕ СООБЩЕНИЯ ===
+NOT_FOUND_MESSAGE = (
+    "❌ К сожалению, мы не нашли тебя в базе данных.\n"
+    "Если ты точно выпускник ОШБ, возможно, произошла ошибка.\n"
+    "Нажми на кнопку ниже, чтобы написать администратору — мы обязательно разберёмся!"
+)
+INSTRUCTION_MESSAGE = (
+    "👋 Привет! Я бот для проверки выпускников ФМЛ 30.\n\n"
+    "Это админ чата Сергей Федоров, 1983-2.\n\n"
+    "Для вступления в группу выпускников необходимо подтвердить что вы учились в школе.\n\n"
+    "📝 Отправьте мне ваши данные в любом из форматов:\n\n"
+    "▫️ Простой: Федоров Сергей 2010 2\n\n"
+    "▫️ Структурированный:\n"
+    "ФИО: Иван Петров\n"
+    "Год: 2015\n"
+    "Класс: 3\n\n"
+    "▫️ Пошагово: отправьте /start\n\n"
+    "После проверки данных повторно подайте заявку в группу - она будет одобрена автоматически! ✅"
+)
+
 async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     """Отправляет сообщение о том что пользователь не найден с кнопкой админа"""
-    message = (
-        f"❌ К сожалению, в базе выпускников не найден:\n"
-        f"ФИО: {fio}\n"
-        f"Год: {year}\n"
-        f"Класс: {klass}\n\n"
-        f"Возможные причины:\n"
-        f"• Опечатка в написании ФИО\n"
-        f"• Указан неверный год выпуска или класс\n"
-        f"• Данные отсутствуют в базе школы\n\n"
-        f"Проверьте правильность данных и попробуйте еще раз."
-    )
-    
+    message = NOT_FOUND_MESSAGE
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(
-            "🆘 Произошла ошибка, я точно выпускник ФМЛ 30",
+            "🆘 Произошла ошибка, я точно выпускник ОШБ",
             callback_data=f"admin_help_{user_id}"
         )]
     ])
-    
     await send_message(user_id, message, context_or_app, keyboard)
 
 def create_instruction_message():
     """Создает стандартное сообщение с инструкциями"""
-    return (
-        "👋 Привет! Я бот для проверки выпускников ФМЛ 30.\n\n"
-        "Это админ чата Сергей Федоров, 1983-2.\n\n"
-        "Для вступления в группу выпускников необходимо подтвердить что вы учились в школе.\n\n"
-        "📝 Отправьте мне ваши данные в любом из форматов:\n\n"
-        "▫️ Простой: Федоров Сергей 2010 2\n\n"
-        "▫️ Структурированный:\n"
-        "ФИО: Иван Петров\n"
-        "Год: 2015\n"
-        "Класс: 3\n\n"
-        "▫️ Пошагово: отправьте /start\n\n"
-        "После проверки данных повторно подайте заявку в группу - она будет одобрена автоматически! ✅"
-    )
+    return INSTRUCTION_MESSAGE
 
 # Обработчики
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,10 +339,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_id = update.chat_join_request.from_user.id
         chat_id = update.chat_join_request.chat.id
         bio = getattr(update.chat_join_request, 'bio', None)
-        
         logger.info(f"Processing join request from user {user_id} in chat {chat_id}")
         logger.info(f"Bio present: {bio is not None}")
-        
         # Проверяем whitelist
         if user_id in verified_users:
             logger.info(f"User {user_id} is verified, approving")
@@ -339,19 +350,18 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.info(f"Approved request from verified user {user_id}")
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
+                try:
+                    await send_message(user_id, "Произошла ошибка при одобрении вашей заявки. Пожалуйста, попробуйте позже или напишите администратору.", context)
+                except Exception as e2:
+                    logger.error(f"Error sending error message to user: {e2}")
             return
-        
         # Если bio отсутствует
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio")
             logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
-            
-            # Отправляем простое сообщение в группу синхронно
             user_info = update.chat_join_request.from_user
             username = f"@{user_info.username}" if user_info.username else user_info.first_name
-            
             try:
-                # Получаем username бота и отправляем простое сообщение
                 bot_info = await context.bot.get_me()
                 group_message = f"👋 {username}, для вступления в группу выпускников ФМЛ 30, перейди в личку @{bot_info.username} и нажми /start. Бот сверится с БД."
                 await context.bot.send_message(chat_id=chat_id, text=group_message)
@@ -359,16 +369,24 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"❌ Could not send group message for {username}: {e}")
                 logger.info(f"⏳ Pending request from {username} (user_id: {user_id})")
+            try:
+                await send_message(user_id, "Ваша заявка отклонена, так как не указано био. Пожалуйста, напишите боту в личные сообщения для подтверждения.", context)
+            except Exception as e2:
+                logger.error(f"Error sending decline message to user: {e2}")
             return
-        
         # Парсим данные из bio
         fio, year, klass = parse_text(bio)
-        
         if not (fio and year and klass):
             logger.info(f"Declining request from {user_id}: incomplete data")
-            await context.bot.decline_chat_join_request(chat_id, user_id)
+            try:
+                await context.bot.decline_chat_join_request(chat_id, user_id)
+            except Exception as e:
+                logger.error(f"Error declining join request: {e}")
+            try:
+                await send_message(user_id, "Ваша заявка отклонена, так как указаны неполные данные. Пожалуйста, напишите боту в личные сообщения для подтверждения.", context)
+            except Exception as e2:
+                logger.error(f"Error sending decline message to user: {e2}")
             return
-        
         # Проверяем в базе
         if check_user(fio, year, klass):
             logger.info(f"Approving request from {user_id}")
@@ -377,14 +395,24 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.info(f"Approved request from {user_id} - user found in database")
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
+                try:
+                    await send_message(user_id, "Произошла ошибка при одобрении вашей заявки. Пожалуйста, попробуйте позже или напишите администратору.", context)
+                except Exception as e2:
+                    logger.error(f"Error sending error message to user: {e2}")
         else:
             logger.info(f"Declining request from {user_id}: user not found")
             logger.info(f"Request should be declined for {user_id} - user not found in database")
-            # Не вызываем decline_chat_join_request из-за проблем с event loop
-            # Пусть пользователь сам напишет боту
-            
+            try:
+                await send_not_found_message(user_id, fio, year, klass, context)
+            except Exception as e2:
+                logger.error(f"Error sending not found message to user: {e2}")
     except Exception as e:
         logger.error(f"Error handling join request: {e}")
+        try:
+            user_id = update.chat_join_request.from_user.id
+            await send_message(user_id, "Произошла внутренняя ошибка при обработке вашей заявки. Пожалуйста, попробуйте позже или напишите администратору.", context)
+        except Exception as e2:
+            logger.error(f"Error sending error message to user: {e2}")
 
 async def handle_private_message(user_id, text, telegram_app):
     """Обрабатывает личные сообщения"""
@@ -549,8 +577,12 @@ except Exception as e:
     logger.error(f"Failed to initialize Telegram application: {e}")
     raise
 
+# === ЗАЩИТА WEBHOOK ПО СЕКРЕТУ ===
+WEBHOOK_SECRET = get_env_var("WEBHOOK_SECRET")
+WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else "/"
+
 # Flask routes
-@app.route("/", methods=["POST"])
+@app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
     """Webhook endpoint для получения обновлений от Telegram"""
     try:
