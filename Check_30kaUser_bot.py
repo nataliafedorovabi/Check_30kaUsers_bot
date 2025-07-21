@@ -359,11 +359,9 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Если bio отсутствует
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio")
-            try:
-                await context.bot.decline_chat_join_request(chat_id, user_id)
-                logger.info(f"Request declined for user {user_id}. User should write to bot directly.")
-            except Exception as e:
-                logger.error(f"Error declining request: {e}")
+            logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
+            # Не вызываем decline_chat_join_request из-за проблем с event loop
+            # Заявка останется pending, но пользователь может написать боту напрямую
             return
         
         # Парсим данные из bio
@@ -384,13 +382,9 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.error(f"Error approving request: {e}")
         else:
             logger.info(f"Declining request from {user_id}: user not found")
-            try:
-                await context.bot.decline_chat_join_request(chat_id, user_id)
-                logger.info(f"Declined request from {user_id} - user not found in database")
-            except Exception as e:
-                logger.error(f"Error declining request: {e}")
-            
-            # Не пытаемся отправить сообщение - пусть пользователь сам напишет боту
+            logger.info(f"Request should be declined for {user_id} - user not found in database")
+            # Не вызываем decline_chat_join_request из-за проблем с event loop
+            # Пусть пользователь сам напишет боту
             
     except Exception as e:
         logger.error(f"Error handling join request: {e}")
