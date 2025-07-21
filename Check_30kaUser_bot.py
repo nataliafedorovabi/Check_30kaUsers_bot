@@ -160,7 +160,8 @@ def format_for_db(value, field_type="string"):
     """Форматирует значения для поиска в БД"""
     if field_type in ["year", "class"]:
         try:
-            return f"{int(value)}.00"
+            # Возвращаем integer для PostgreSQL (без .00)
+            return int(value)
         except ValueError:
             logger.warning(f"Invalid {field_type} format: {value}")
             return None
@@ -231,9 +232,10 @@ def check_user(fio, year, klass):
     formatted_year = format_for_db(year, "year")
     formatted_class = format_for_db(klass, "class")
     
-    logger.info(f"📝 Normalized data - FIO parts: {fio_set}, Year: {formatted_year}, Class: {formatted_class}")
+                            logger.info(f"📝 Normalized data - FIO parts: {fio_set}, Year: {formatted_year}, Class: {formatted_class}")
+    logger.info(f"📊 Data types - Year: {type(formatted_year)}, Class: {type(formatted_class)}")
     
-    if not (formatted_year and formatted_class):
+    if formatted_year is None or formatted_class is None:
         logger.warning("❌ Invalid year or class format for database")
         return False
     

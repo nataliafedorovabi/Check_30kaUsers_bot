@@ -4,8 +4,8 @@
 CREATE TABLE IF NOT EXISTS cms_users (
     id SERIAL PRIMARY KEY,
     fio VARCHAR(255) NOT NULL,
-    year DECIMAL(5,2) NOT NULL,
-    klass DECIMAL(3,2) NOT NULL,
+    year INTEGER NOT NULL,
+    klass INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -15,9 +15,9 @@ CREATE INDEX IF NOT EXISTS idx_cms_users_fio ON cms_users (fio);
 
 -- Примеры вставки данных (замените на ваши данные)
 -- INSERT INTO cms_users (fio, year, klass) VALUES 
--- ('Иванов Иван Иванович', 2015.00, 5.00),
--- ('Петров Петр Петрович', 2010.00, 3.00),
--- ('Федоров Сергей Александрович', 2010.00, 2.00);
+-- ('Иванов Иван Иванович', 2015, 5),
+-- ('Петров Петр Петрович', 2010, 3),
+-- ('Федоров Сергей Александрович', 2010, 2);
 
 -- Проверка данных
 -- SELECT * FROM cms_users LIMIT 10;
