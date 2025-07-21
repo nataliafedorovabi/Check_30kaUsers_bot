@@ -52,6 +52,7 @@ DB_TABLE = get_env_var("DB_TABLE", "cms_users")  # Имя таблицы с вы
 WEBHOOK_URL = get_env_var("WEBHOOK_URL")
 GROUP_ID = get_env_var("GROUP_ID", 0, int)
 PORT = get_env_var("PORT", 10000, int)
+ADMIN_ID = get_env_var("ADMIN_ID", 0, int)  # ID админа для уведомлений
 
 # Проверяем наличие обязательных переменных
 required_values = {
@@ -291,24 +292,38 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Failed to decline request from {user_id}: {e}")
             
-            # Отправляем инструкции пользователю в личные сообщения
+            # Отправляем инструкции пользователю в личные сообщения с кнопкой
             try:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                
                 instruction_message = (
-                    "Привет, спасибо за заявку в чате выпускников 30ки.\n\n"
+                    "❌ Ваша заявка на вступление в чат выпускников 30ки отклонена.\n\n"
                     "Это админ чата Сергей Федоров, 1983-2.\n\n"
-                    "К сожалению, в публичных группах нет поля для указания данных при подаче заявки.\n\n"
-                    "Пожалуйста, отправьте мне данные в этом чате в формате:\n"
-                    "• ФИО: [Ваши Фамилия Имя]\n"
-                    "• Год: [год выпуска]\n"
-                    "• Класс: [номер класса]\n\n"
-                    "Пример:\n"
+                    "Для вступления необходимо подтвердить что вы выпускник школы.\n\n"
+                    "Пожалуйста, отправьте мне данные в одном из форматов:\n\n"
+                    "📝 Простой: Федоров Сергей 2010 2\n"
+                    "📋 Структурированный:\n"
                     "ФИО: Иван Петров\n"
                     "Год: 2015\n"
-                    "Класс: 3\n\n"
+                    "Класс: 3\n"
+                    "🤖 Пошагово: /start\n\n"
                     "После проверки данных повторно подайте заявку - она будет одобрена автоматически."
                 )
-                await context.bot.send_message(chat_id=user_id, text=instruction_message)
-                logger.info(f"Sent instructions to user {user_id}")
+                
+                # Создаем кнопку для связи с админом
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        "🆘 Произошла ошибка, я точно выпускник ФМЛ 30",
+                        callback_data=f"admin_help_{user_id}"
+                    )]
+                ])
+                
+                await context.bot.send_message(
+                    chat_id=user_id, 
+                    text=instruction_message,
+                    reply_markup=keyboard
+                )
+                logger.info(f"Sent instructions with admin button to user {user_id}")
             except Exception as e:
                 logger.warning(f"Could not send instructions to user {user_id}: {e}")
             
@@ -457,6 +472,10 @@ def webhook():
                     logger.error(f"Error in run_sync: {e}")
             
             run_sync()
+        elif update.callback_query:
+            # Обрабатываем нажатия на кнопки
+            logger.info("Processing callback query")
+            await handle_callback_query(update, telegram_app)
         elif update.message and update.message.chat.type.name == 'PRIVATE':
             # Обрабатываем личные сообщения с данными пользователя
             logger.info("Processing private message with user data")
@@ -492,13 +511,9 @@ def webhook():
                         f"Ссылка на группу: https://t.me/test_bots_nf"
                     )
                 else:
-                    response = (
-                        f"❌ К сожалению, в базе не найден:\n"
-                        f"ФИО: {fio}\n"
-                        f"Год: {year}\n"
-                        f"Класс: {klass}\n\n"
-                        f"Проверьте правильность данных или обратитесь к администратору."
-                    )
+                    # Отправляем сообщение с кнопкой админа
+                    await send_not_found_message(user_id, fio, year, klass, telegram_app)
+                    return "ok"
             else:
                 # Предлагаем пошаговый ввод
                 response = (
@@ -593,13 +608,11 @@ async def handle_step_input(user_id, text, telegram_app):
                         f"Ссылка на группу: https://t.me/test_bots_nf"
                     )
                 else:
-                    response = (
-                        f"❌ К сожалению, в базе не найден:\n"
-                        f"ФИО: {fio}\n"
-                        f"Год: {year}\n"
-                        f"Класс: {klass}\n\n"
-                        f"Проверьте правильность данных или обратитесь к администратору."
-                    )
+                    # Отправляем сообщение с кнопкой админа
+                    await send_not_found_message(user_id, fio, year, klass, telegram_app)
+                    # Удаляем состояние
+                    del user_states[user_id]
+                    return
                 
                 # Удаляем состояние
                 del user_states[user_id]
@@ -636,6 +649,94 @@ async def send_message(user_id, text, telegram_app):
         logger.info(f"Sent message to user {user_id}")
     except Exception as e:
         logger.error(f"Error sending message to {user_id}: {e}")
+
+async def send_not_found_message(user_id, fio, year, klass, telegram_app):
+    """Отправляет сообщение о том что пользователь не найден с кнопкой админа"""
+    try:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
+        message = (
+            f"❌ К сожалению, в базе выпускников не найден:\n"
+            f"ФИО: {fio}\n"
+            f"Год: {year}\n"
+            f"Класс: {klass}\n\n"
+            f"Возможные причины:\n"
+            f"• Опечатка в написании ФИО\n"
+            f"• Указан неверный год выпуска или класс\n"
+            f"• Данные отсутствуют в базе школы\n\n"
+            f"Проверьте правильность данных и попробуйте еще раз или обратитесь к администратору."
+        )
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "🆘 Произошла ошибка, я точно выпускник ФМЛ 30",
+                callback_data=f"admin_help_{user_id}"
+            )]
+        ])
+        
+        from telegram.ext import CallbackContext
+        context = CallbackContext(application=telegram_app)
+        await context.bot.send_message(
+            chat_id=user_id, 
+            text=message,
+            reply_markup=keyboard
+        )
+        logger.info(f"Sent 'not found' message with admin button to user {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Error sending not found message to {user_id}: {e}")
+
+async def handle_callback_query(update, telegram_app):
+    """Обрабатывает нажатия на inline кнопки"""
+    try:
+        query = update.callback_query
+        user_id = query.from_user.id
+        data = query.data
+        
+        logger.info(f"Callback query from {user_id}: {data}")
+        
+        if data.startswith("admin_help_"):
+            # Пользователь нажал кнопку "Произошла ошибка"
+            user_info = query.from_user
+            username = f"@{user_info.username}" if user_info.username else "без username"
+            
+            # Отвечаем пользователю
+            await query.answer("Ваш запрос отправлен администратору")
+            
+            user_message = (
+                "✅ Ваш запрос отправлен администратору.\n\n"
+                "Администратор свяжется с вами в ближайшее время для решения вопроса.\n\n"
+                "Пожалуйста, ожидайте ответа."
+            )
+            
+            await send_message(user_id, user_message, telegram_app)
+            
+            # Уведомляем админа
+            if ADMIN_ID != 0:
+                admin_message = (
+                    f"🆘 ЗАПРОС НА ПОМОЩЬ ОТ ПОЛЬЗОВАТЕЛЯ\n\n"
+                    f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
+                    f"📧 Username: {username}\n"
+                    f"🆔 ID: {user_id}\n"
+                    f"📱 Язык: {user_info.language_code or 'не указан'}\n\n"
+                    f"💬 Сообщение: Пользователь утверждает что является выпускником ФМЛ 30, но не найден в базе данных.\n\n"
+                    f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
+                )
+                
+                try:
+                    await send_message(ADMIN_ID, admin_message, telegram_app)
+                    logger.info(f"Sent admin notification about user {user_id}")
+                except Exception as e:
+                    logger.error(f"Failed to notify admin: {e}")
+            else:
+                logger.warning("ADMIN_ID not configured, cannot notify admin")
+                
+    except Exception as e:
+        logger.error(f"Error handling callback query: {e}")
+        try:
+            await query.answer("Произошла ошибка, попробуйте еще раз")
+        except:
+            pass
 
 # Установка webhook
 async def setup_webhook():
