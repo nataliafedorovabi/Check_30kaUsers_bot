@@ -348,15 +348,22 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Проверяем whitelist
         if user_id in verified_users:
             logger.info(f"User {user_id} is verified, approving")
-            await context.bot.approve_chat_join_request(chat_id, user_id)
-            verified_users.discard(user_id)
+            try:
+                await context.bot.approve_chat_join_request(chat_id, user_id)
+                verified_users.discard(user_id)
+                logger.info(f"Approved request from verified user {user_id}")
+            except Exception as e:
+                logger.error(f"Error approving request: {e}")
             return
         
         # Если bio отсутствует
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio")
-            await context.bot.decline_chat_join_request(chat_id, user_id)
-            logger.info(f"Request declined for user {user_id}. User should write to bot directly.")
+            try:
+                await context.bot.decline_chat_join_request(chat_id, user_id)
+                logger.info(f"Request declined for user {user_id}. User should write to bot directly.")
+            except Exception as e:
+                logger.error(f"Error declining request: {e}")
             return
         
         # Парсим данные из bio
@@ -370,11 +377,20 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Проверяем в базе
         if check_user(fio, year, klass):
             logger.info(f"Approving request from {user_id}")
-            await context.bot.approve_chat_join_request(chat_id, user_id)
+            try:
+                await context.bot.approve_chat_join_request(chat_id, user_id)
+                logger.info(f"Approved request from {user_id} - user found in database")
+            except Exception as e:
+                logger.error(f"Error approving request: {e}")
         else:
             logger.info(f"Declining request from {user_id}: user not found")
-            await context.bot.decline_chat_join_request(chat_id, user_id)
-            await send_not_found_message(user_id, fio, year, klass, context)
+            try:
+                await context.bot.decline_chat_join_request(chat_id, user_id)
+                logger.info(f"Declined request from {user_id} - user not found in database")
+            except Exception as e:
+                logger.error(f"Error declining request: {e}")
+            
+            # Не пытаемся отправить сообщение - пусть пользователь сам напишет боту
             
     except Exception as e:
         logger.error(f"Error handling join request: {e}")
