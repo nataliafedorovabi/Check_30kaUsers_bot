@@ -213,6 +213,11 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info(f"ChatJoinRequest attributes: {dir(update.chat_join_request)}")
         logger.info(f"Full ChatJoinRequest: {update.chat_join_request}")
         
+        # Проверяем реальное значение bio
+        actual_bio = update.chat_join_request.bio
+        logger.info(f"Actual bio value: {repr(actual_bio)}")
+        logger.info(f"Bio type: {type(actual_bio)}")
+        
         # Может быть это поле называется по-другому?
         for attr in ['bio', 'message', 'text', 'comment', 'description']:
             value = getattr(update.chat_join_request, attr, None)
@@ -363,20 +368,42 @@ def webhook():
                 except Exception as e:
                     logger.error(f"Error in process_join_request: {e}")
             
-            # Запускаем асинхронно
-            import threading
+            # Запускаем в существующем event loop
+            import asyncio
             
-            def run_async():
+            def run_sync():
                 try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(process_join_request())
-                    loop.close()
+                    # Создаем новый event loop в отдельном потоке
+                    import threading
+                    result = []
+                    error = []
+                    
+                    def thread_worker():
+                        try:
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            new_loop.run_until_complete(process_join_request())
+                            new_loop.close()
+                            result.append("success")
+                        except Exception as e:
+                            error.append(str(e))
+                            logger.error(f"Error in thread_worker: {e}")
+                    
+                    thread = threading.Thread(target=thread_worker)
+                    thread.start()
+                    thread.join(timeout=30)  # Ждем максимум 30 секунд
+                    
+                    if error:
+                        logger.error(f"Join request processing failed: {error[0]}")
+                    elif result:
+                        logger.info("Join request processed successfully")
+                    else:
+                        logger.warning("Join request processing timed out")
+                        
                 except Exception as e:
-                    logger.error(f"Error in async execution: {e}")
+                    logger.error(f"Error in run_sync: {e}")
             
-            thread = threading.Thread(target=run_async)
-            thread.start()
+            run_sync()
         else:
             logger.info("No chat_join_request found in update")
         
