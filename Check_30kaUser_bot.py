@@ -361,11 +361,10 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.info(f"Declining request from {user_id}: no bio")
             logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
             
-            # Логируем информацию для админа о необходимости отправить сообщение
+            # Заявка остается pending - пользователь должен написать боту сам
             user_info = update.chat_join_request.from_user
             username = f"@{user_info.username}" if user_info.username else user_info.first_name
-            logger.info(f"📢 ADMIN ACTION NEEDED: Send message to group:")
-            logger.info(f"👋 {username}, для вступления в группу выпускников ФМЛ 30, перейди в личку к боту и нажми /start. Бот сверится с БД.")
+            logger.info(f"⏳ Pending request from {username} (user_id: {user_id})")
             return
         
         # Парсим данные из bio
