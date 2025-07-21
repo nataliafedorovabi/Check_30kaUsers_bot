@@ -361,40 +361,11 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.info(f"Declining request from {user_id}: no bio")
             logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
             
-            # Отправляем сообщение в группу для пользователя
-            def send_group_message_async():
-                try:
-                    import asyncio
-                    import threading
-                    
-                    async def send_group_message():
-                        try:
-                            user_info = update.chat_join_request.from_user
-                            username = f"@{user_info.username}" if user_info.username else user_info.first_name
-                            
-                            group_message = (
-                                f"👋 {username}, для вступления в группу выпускников ФМЛ 30:\n\n"
-                                f"📝 Напишите боту @{(await context.bot.get_me()).username} ваши данные:\n"
-                                f"• ФИО, год выпуска, класс\n"
-                                f"• Например: Федоров Сергей 2010 2\n"
-                                f"• Или команду /start для пошагового ввода\n\n"
-                                f"После проверки заявка будет одобрена автоматически! ✅"
-                            )
-                            
-                            await context.bot.send_message(chat_id=chat_id, text=group_message)
-                            logger.info(f"Sent group instruction message for user {user_id}")
-                        except Exception as e:
-                            logger.error(f"Could not send group message for user {user_id}: {e}")
-                    
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    new_loop.run_until_complete(send_group_message())
-                    new_loop.close()
-                except Exception as e:
-                    logger.error(f"Error in send_group_message_async: {e}")
-            
-            # Запускаем в отдельном потоке через 2 секунды
-            threading.Timer(2.0, send_group_message_async).start()
+            # Логируем информацию для админа о необходимости отправить сообщение
+            user_info = update.chat_join_request.from_user
+            username = f"@{user_info.username}" if user_info.username else user_info.first_name
+            logger.info(f"📢 ADMIN ACTION NEEDED: Send message to group:")
+            logger.info(f"👋 {username}, для вступления в группу выпускников ФМЛ 30, перейди в личку к боту и нажми /start. Бот сверится с БД.")
             return
         
         # Парсим данные из bio
