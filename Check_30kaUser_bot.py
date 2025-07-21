@@ -238,24 +238,44 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.warning(f"GROUP_ID mismatch! Expected: {GROUP_ID}, Got: {chat_id}")
             logger.info("Continuing processing for debugging purposes...")
         
+        # Проверяем whitelist проверенных пользователей
+        if user_id in verified_users:
+            logger.info(f"User {user_id} is in whitelist, approving automatically")
+            try:
+                await context.bot.approve_chat_join_request(chat_id, user_id)
+                logger.info(f"Successfully approved request from verified user {user_id}")
+                # Удаляем из whitelist после использования
+                verified_users.discard(user_id)
+                return
+            except Exception as e:
+                logger.error(f"Failed to approve request from {user_id}: {e}")
+        
         # Если bio отсутствует, отклоняем и отправляем инструкции
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio provided")
-            await context.bot.decline_chat_join_request(chat_id, user_id)
+            
+            # Отклоняем заявку
+            try:
+                await context.bot.decline_chat_join_request(chat_id, user_id)
+                logger.info(f"Successfully declined request from {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to decline request from {user_id}: {e}")
             
             # Отправляем инструкции пользователю в личные сообщения
             try:
                 instruction_message = (
                     "Привет, спасибо за заявку в чате выпускников 30ки.\n\n"
                     "Это админ чата Сергей Федоров, 1983-2.\n\n"
-                    "Для доступа в чат просьба повторно подать заявку и указать в описании:\n"
+                    "К сожалению, в публичных группах нет поля для указания данных при подаче заявки.\n\n"
+                    "Пожалуйста, отправьте мне данные в этом чате в формате:\n"
                     "• ФИО: [Ваши Фамилия Имя]\n"
                     "• Год: [год выпуска]\n"
                     "• Класс: [номер класса]\n\n"
-                    "Пример заполнения:\n"
+                    "Пример:\n"
                     "ФИО: Иван Петров\n"
                     "Год: 2015\n"
-                    "Класс: 3"
+                    "Класс: 3\n\n"
+                    "После проверки данных повторно подайте заявку - она будет одобрена автоматически."
                 )
                 await context.bot.send_message(chat_id=user_id, text=instruction_message)
                 logger.info(f"Sent instructions to user {user_id}")
@@ -421,12 +441,15 @@ def webhook():
             if fio and year and klass:
                 # Проверяем пользователя в базе
                 if check_user(fio, year, klass):
+                    # Добавляем в whitelist
+                    verified_users.add(user_id)
                     response = (
                         f"✅ Отлично! Вы найдены в базе выпускников:\n"
                         f"ФИО: {fio}\n"
                         f"Год: {year}\n"
                         f"Класс: {klass}\n\n"
-                        f"Теперь подайте заявку на вступление в группу - она будет одобрена автоматически."
+                        f"Теперь подайте заявку на вступление в группу - она будет одобрена автоматически.\n\n"
+                        f"Ссылка на группу: https://t.me/test_bots_nf"
                     )
                 else:
                     response = (
