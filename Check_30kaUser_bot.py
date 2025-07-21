@@ -545,14 +545,12 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else "/"
 
 if __name__ == "__main__":
-    async def main():
-        # Устанавливаем webhook
-        webhook_url = f"{Config.WEBHOOK_URL}/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else f"{Config.WEBHOOK_URL}/"
-        await telegram_app.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
-        telegram_app.run_webhook(
-            listen="0.0.0.0",
-            port=Config.PORT,
-            webhook_url=webhook_url
-        )
-    asyncio.run(main())
+    webhook_url = f"{Config.WEBHOOK_URL}/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else f"{Config.WEBHOOK_URL}/"
+    # Синхронно устанавливаем webhook (PTB позволяет так делать)
+    telegram_app.bot.set_webhook(webhook_url)
+    logger.info(f"Webhook set to {webhook_url}")
+    telegram_app.run_webhook(
+        listen="0.0.0.0",
+        port=Config.PORT,
+        webhook_url=webhook_url
+    )
