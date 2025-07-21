@@ -108,7 +108,12 @@ def get_db_connection():
             password=Config.DB_PASSWORD,
             database=Config.DB_NAME,
             charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=10,
+            read_timeout=10,
+            write_timeout=10,
+            autocommit=True,
+            ssl_disabled=True  # Отключаем SSL для совместимости с некоторыми хостингами
         )
         logger.info("✅ Database connection successful")
         yield conn
@@ -546,6 +551,79 @@ def webhook():
         logger.error(f"Webhook error: {e}")
         return "error", 500
 
+# Database connection testing
+def test_database_connection():
+    """Тестирует разные варианты подключения к БД"""
+    logger.info("🧪 Testing database connection with different parameters...")
+    
+    connection_params = [
+        {
+            "name": "Standard connection",
+            "params": {
+                "host": Config.DB_HOST,
+                "port": Config.DB_PORT,
+                "user": Config.DB_USER,
+                "password": Config.DB_PASSWORD,
+                "database": Config.DB_NAME,
+                "charset": 'utf8mb4',
+                "connect_timeout": 10,
+                "ssl_disabled": True
+            }
+        },
+        {
+            "name": "Connection with SSL",
+            "params": {
+                "host": Config.DB_HOST,
+                "port": Config.DB_PORT,
+                "user": Config.DB_USER,
+                "password": Config.DB_PASSWORD,
+                "database": Config.DB_NAME,
+                "charset": 'utf8mb4',
+                "connect_timeout": 10,
+                "ssl": {'check_hostname': False, 'verify_mode': 0}
+            }
+        },
+        {
+            "name": "Connection without database specified",
+            "params": {
+                "host": Config.DB_HOST,
+                "port": Config.DB_PORT,
+                "user": Config.DB_USER,
+                "password": Config.DB_PASSWORD,
+                "charset": 'utf8mb4',
+                "connect_timeout": 5,
+                "ssl_disabled": True
+            }
+        }
+    ]
+    
+    for test in connection_params:
+        try:
+            logger.info(f"🔌 Testing: {test['name']}")
+            conn = pymysql.connect(**test['params'])
+            logger.info(f"✅ {test['name']} - SUCCESS!")
+            
+            # Если подключились без указания БД, проверяем доступные базы
+            if 'database' not in test['params']:
+                with conn.cursor() as cursor:
+                    cursor.execute("SHOW DATABASES")
+                    databases = cursor.fetchall()
+                    db_names = [db[0] for db in databases]
+                    logger.info(f"📋 Available databases: {db_names}")
+                    
+                    if Config.DB_NAME in db_names:
+                        logger.info(f"✅ Target database '{Config.DB_NAME}' found")
+                    else:
+                        logger.error(f"❌ Target database '{Config.DB_NAME}' not found")
+            
+            conn.close()
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ {test['name']} - FAILED: {e}")
+    
+    return False
+
 # Database verification
 def verify_database():
     """Проверяет подключение к базе данных и структуру таблицы"""
@@ -615,6 +693,20 @@ def verify_database():
 async def setup_webhook():
     """Устанавливает webhook для бота"""
     try:
+        # Логируем настройки БД (без пароля)
+        logger.info("🔧 Database configuration:")
+        logger.info(f"  Host: {Config.DB_HOST}")
+        logger.info(f"  Port: {Config.DB_PORT}")
+        logger.info(f"  Database: {Config.DB_NAME}")
+        logger.info(f"  User: {Config.DB_USER}")
+        logger.info(f"  Table: {Config.DB_TABLE}")
+        logger.info(f"  Password length: {len(Config.DB_PASSWORD) if Config.DB_PASSWORD else 0} chars")
+        
+        # Тестируем подключение к базе данных
+        logger.info("🔧 Testing database connectivity...")
+        if not test_database_connection():
+            logger.error("❌ All database connection tests failed")
+        
         # Проверяем базу данных перед запуском
         if not verify_database():
             logger.error("❌ Database verification failed - bot may not work correctly")
