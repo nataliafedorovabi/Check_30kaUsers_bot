@@ -634,18 +634,20 @@ def test_database_connection():
             else:
                 # Подключение через отдельные параметры
                 conn = psycopg2.connect(**test['params'])
-                
+            
+            conn.autocommit = True  # Включаем автокоммит
             logger.info(f"✅ {test['name']} - SUCCESS!")
             
             # Проверяем версию PostgreSQL и доступные схемы
             with conn.cursor() as cursor:
                 cursor.execute("SELECT version()")
-                version = cursor.fetchone()[0]
+                version_row = cursor.fetchone()
+                version = version_row['version'] if version_row else "Unknown"
                 logger.info(f"📊 PostgreSQL version: {version}")
                 
                 cursor.execute("SELECT schema_name FROM information_schema.schemata")
                 schemas = cursor.fetchall()
-                schema_names = [schema[0] for schema in schemas]
+                schema_names = [schema['schema_name'] for schema in schemas]
                 logger.info(f"📋 Available schemas: {schema_names}")
             
             conn.close()
