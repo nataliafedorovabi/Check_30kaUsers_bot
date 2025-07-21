@@ -360,8 +360,36 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio")
             logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
-            # Не вызываем decline_chat_join_request из-за проблем с event loop
-            # Заявка останется pending, но пользователь может написать боту напрямую
+            
+            # Попытаемся отправить инструкции через отдельный поток
+            def send_instruction_async():
+                try:
+                    import asyncio
+                    import threading
+                    
+                    async def send_instruction():
+                        try:
+                            instruction_text = (
+                                "👋 Привет! Ваша заявка на вступление в группу выпускников ФМЛ 30 получена.\n\n"
+                                "Для проверки отправьте мне ваши данные:\n"
+                                "ФИО, год выпуска, класс\n\n"
+                                "Например: Федоров Сергей 2010 2\n"
+                                "Или используйте /start для пошагового ввода"
+                            )
+                            await context.bot.send_message(chat_id=user_id, text=instruction_text)
+                            logger.info(f"Sent instruction message to user {user_id}")
+                        except Exception as e:
+                            logger.error(f"Could not send instruction to user {user_id}: {e}")
+                    
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    new_loop.run_until_complete(send_instruction())
+                    new_loop.close()
+                except Exception as e:
+                    logger.error(f"Error in send_instruction_async: {e}")
+            
+            # Запускаем в отдельном потоке через 2 секунды
+            threading.Timer(2.0, send_instruction_async).start()
             return
         
         # Парсим данные из bio
