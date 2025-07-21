@@ -232,7 +232,7 @@ def check_user(fio, year, klass):
     formatted_year = format_for_db(year, "year")
     formatted_class = format_for_db(klass, "class")
     
-                            logger.info(f"📝 Normalized data - FIO parts: {fio_set}, Year: {formatted_year}, Class: {formatted_class}")
+    logger.info(f"📝 Normalized data - FIO parts: {fio_set}, Year: {formatted_year}, Class: {formatted_class}")
     logger.info(f"📊 Data types - Year: {type(formatted_year)}, Class: {type(formatted_class)}")
     
     if formatted_year is None or formatted_class is None:
