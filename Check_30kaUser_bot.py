@@ -1,11 +1,9 @@
 import os
 import asyncio
-import threading
 import psycopg2
 import psycopg2.extras
 import logging
 from contextlib import contextmanager
-from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, ChatJoinRequestHandler, CallbackContext
 
@@ -67,41 +65,6 @@ missing_vars = [var for var in required_vars if not getattr(Config, var)]
 if missing_vars:
     logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-# Flask приложение
-app = Flask(__name__)
-
-# Глобальные переменные
-verified_users = set()  # Whitelist проверенных пользователей
-user_states = {}  # Состояния пошагового ввода
-
-# Утилиты для работы с асинхронностью
-def run_async_in_thread(async_func, timeout=30):
-    """Запускает асинхронную функцию в отдельном потоке"""
-    result = []
-    error = []
-    
-    def thread_worker():
-        try:
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            new_loop.run_until_complete(async_func())
-            new_loop.close()
-            result.append("success")
-        except Exception as e:
-            error.append(str(e))
-            logger.error(f"Error in async thread: {e}")
-    
-    thread = threading.Thread(target=thread_worker)
-    thread.start()
-    thread.join(timeout=timeout)
-    
-    if error:
-        logger.error(f"Async processing failed: {error[0]}")
-    elif result:
-        logger.info("Async processing completed successfully")
-    else:
-        logger.warning(f"Async processing timed out after {timeout}s")
 
 # База данных
 @contextmanager
@@ -578,254 +541,20 @@ except Exception as e:
     raise
 
 # === ЗАЩИТА WEBHOOK ПО СЕКРЕТУ ===
-WEBHOOK_SECRET = get_env_var("WEBHOOK_SECRET")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else "/"
 
-# Flask routes
-@app.route(WEBHOOK_PATH, methods=["POST"])
-def webhook():
-    """Webhook endpoint для получения обновлений от Telegram"""
-    try:
-        json_data = request.get_json(force=True)
-        logger.info(f"Received webhook data: {json_data}")
-        
-        update = Update.de_json(json_data, telegram_app.bot)
-        
-        if update.chat_join_request:
-            logger.info("Processing chat_join_request")
-            async def process_join():
-                context = CallbackContext(application=telegram_app)
-                await handle_join_request(update, context)
-            run_async_in_thread(process_join)
-            
-        elif update.callback_query:
-            logger.info("Processing callback_query")
-            async def process_callback():
-                await handle_callback_query(update, telegram_app)
-            run_async_in_thread(process_callback, timeout=10)
-            
-        elif update.message and update.message.chat.type.name == 'PRIVATE':
-            logger.info("Processing private message")
-            user_id = update.message.from_user.id
-            text = update.message.text or ""
-            
-            async def process_message():
-                await handle_private_message(user_id, text, telegram_app)
-            run_async_in_thread(process_message)
-            
-        return "ok"
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return "error", 500
-
-# Database connection testing
-def test_database_connection():
-    """Тестирует разные варианты подключения к PostgreSQL"""
-    logger.info("🧪 Testing PostgreSQL connection with different parameters...")
-    
-    connection_params = []
-    
-    # Если есть DATABASE_URL, тестируем его
-    if Config.DATABASE_URL:
-        connection_params.append({
-            "name": "DATABASE_URL connection",
-            "params": {
-                "dsn": Config.DATABASE_URL,
-                "cursor_factory": psycopg2.extras.RealDictCursor,
-                "connect_timeout": 10,
-                "sslmode": 'require'
-            }
-        })
-    
-    # Если есть отдельные параметры, тестируем их
-    if Config.DB_HOST:
-        connection_params.extend([
-            {
-                "name": "Individual parameters with SSL required",
-                "params": {
-                    "host": Config.DB_HOST,
-                    "port": Config.DB_PORT,
-                    "user": Config.DB_USER,
-                    "password": Config.DB_PASSWORD,
-                    "database": Config.DB_NAME,
-                    "cursor_factory": psycopg2.extras.RealDictCursor,
-                    "connect_timeout": 10,
-                    "sslmode": 'require'
-                }
-            },
-            {
-                "name": "Individual parameters with SSL preferred",
-                "params": {
-                    "host": Config.DB_HOST,
-                    "port": Config.DB_PORT,
-                    "user": Config.DB_USER,
-                    "password": Config.DB_PASSWORD,
-                    "database": Config.DB_NAME,
-                    "cursor_factory": psycopg2.extras.RealDictCursor,
-                    "connect_timeout": 10,
-                    "sslmode": 'prefer'
-                }
-            }
-        ])
-    
-    for test in connection_params:
-        try:
-            logger.info(f"🔌 Testing: {test['name']}")
-            if 'dsn' in test['params']:
-                # Подключение через DATABASE_URL
-                dsn = test['params'].pop('dsn')
-                conn = psycopg2.connect(dsn, **test['params'])
-            else:
-                # Подключение через отдельные параметры
-                conn = psycopg2.connect(**test['params'])
-            
-            conn.autocommit = True  # Включаем автокоммит
-            logger.info(f"✅ {test['name']} - SUCCESS!")
-            
-            # Проверяем версию PostgreSQL и доступные схемы
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT version()")
-                version_row = cursor.fetchone()
-                version = version_row['version'] if version_row else "Unknown"
-                logger.info(f"📊 PostgreSQL version: {version}")
-                
-                cursor.execute("SELECT schema_name FROM information_schema.schemata")
-                schemas = cursor.fetchall()
-                schema_names = [schema['schema_name'] for schema in schemas]
-                logger.info(f"📋 Available schemas: {schema_names}")
-            
-            conn.close()
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ {test['name']} - FAILED: {e}")
-    
-    return False
-
-# Database verification
-def verify_database():
-    """Проверяет подключение к базе данных и структуру таблицы"""
-    logger.info("🔍 Verifying database connection and table structure...")
-    
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                # Проверяем существование таблицы (PostgreSQL синтаксис)
-                cursor.execute("""
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = 'public'
-                """)
-                tables = cursor.fetchall()
-                table_names = [table['table_name'] for table in tables]
-                
-                logger.info(f"📋 Available tables: {table_names}")
-                
-                if Config.DB_TABLE not in table_names:
-                    logger.error(f"❌ Table '{Config.DB_TABLE}' not found in database!")
-                    return False
-                
-                logger.info(f"✅ Table '{Config.DB_TABLE}' exists")
-                
-                # Проверяем структуру таблицы (PostgreSQL синтаксис)
-                cursor.execute(f"""
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns 
-                    WHERE table_name = %s AND table_schema = 'public'
-                    ORDER BY ordinal_position
-                """, (Config.DB_TABLE,))
-                columns = cursor.fetchall()
-                
-                logger.info(f"📊 Table '{Config.DB_TABLE}' structure:")
-                for col in columns:
-                    logger.info(f"  - {col['column_name']}: {col['data_type']} (Nullable: {col['is_nullable']}, Default: {col['column_default']})")
-                
-                # Проверяем наличие необходимых полей
-                required_fields = ['fio', 'year', 'klass']
-                column_names = [col['column_name'] for col in columns]
-                
-                missing_fields = [field for field in required_fields if field not in column_names]
-                if missing_fields:
-                    logger.error(f"❌ Missing required fields: {missing_fields}")
-                    return False
-                
-                logger.info("✅ All required fields present")
-                
-                # Проверяем количество записей
-                cursor.execute(f"SELECT COUNT(*) as count FROM {Config.DB_TABLE}")
-                count_result = cursor.fetchone()
-                total_records = count_result['count']
-                
-                logger.info(f"📈 Total records in table: {total_records}")
-                
-                # Показываем несколько примеров записей
-                cursor.execute(f"SELECT fio, year, klass FROM {Config.DB_TABLE} LIMIT 5")
-                sample_rows = cursor.fetchall()
-                
-                if sample_rows:
-                    logger.info("📝 Sample records:")
-                    for i, row in enumerate(sample_rows, 1):
-                        logger.info(f"  {i}. FIO: {row['fio']}, Year: {row['year']}, Class: {row['klass']}")
-                else:
-                    logger.warning("⚠️ No records found in table")
-                
-                logger.info("✅ Database verification completed successfully")
-                return True
-                
-    except Exception as e:
-        logger.error(f"❌ Database verification failed: {e}")
-        return False
-
-# Setup
-async def setup_webhook():
-    """Устанавливает webhook для бота"""
-    try:
-        # Логируем настройки PostgreSQL (без пароля)
-        logger.info("🔧 PostgreSQL configuration:")
-        if Config.DATABASE_URL:
-            logger.info(f"  DATABASE_URL: {Config.DATABASE_URL[:50]}...{Config.DATABASE_URL[-20:] if len(Config.DATABASE_URL) > 70 else Config.DATABASE_URL}")
-        logger.info(f"  Host: {Config.DB_HOST}")
-        logger.info(f"  Port: {Config.DB_PORT}")
-        logger.info(f"  Database: {Config.DB_NAME}")
-        logger.info(f"  User: {Config.DB_USER}")
-        logger.info(f"  Table: {Config.DB_TABLE}")
-        logger.info(f"  Password length: {len(Config.DB_PASSWORD) if Config.DB_PASSWORD else 0} chars")
-        
-        # Тестируем подключение к базе данных
-        logger.info("🔧 Testing database connectivity...")
-        if not test_database_connection():
-            logger.error("❌ All database connection tests failed")
-        
-        # Проверяем базу данных перед запуском
-        if not verify_database():
-            logger.error("❌ Database verification failed - bot may not work correctly")
-        
-        await telegram_app.bot.set_webhook(f"{Config.WEBHOOK_URL}/")
-        logger.info(f"Webhook set to {Config.WEBHOOK_URL}/")
-        logger.info(f"Bot configured for GROUP_ID: {Config.GROUP_ID}")
-        
-        if Config.GROUP_ID:
-            try:
-                chat_info = await telegram_app.bot.get_chat(chat_id=Config.GROUP_ID)
-                logger.info(f"Group: {chat_info.title} ({chat_info.type})")
-            except Exception as e:
-                logger.warning(f"Could not get group info: {e}")
-                
-    except Exception as e:
-        logger.error(f"Failed to set webhook: {e}")
-
-def init_app():
-    """Инициализация для production"""
-    try:
-        asyncio.run(setup_webhook())
-        logger.info("Application initialized for production")
-    except Exception as e:
-        logger.error(f"Failed to initialize application: {e}")
-
-# Запуск
 if __name__ == "__main__":
-    asyncio.run(setup_webhook())
-    logger.info("Starting Flask application")
-    app.run(host="0.0.0.0", port=Config.PORT, debug=False)
-else:
-    init_app()
+    async def main():
+        # Устанавливаем webhook
+        webhook_url = f"{Config.WEBHOOK_URL}/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else f"{Config.WEBHOOK_URL}/"
+        webhook_path = f"/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else "/"
+        await telegram_app.bot.set_webhook(webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
+        telegram_app.run_webhook(
+            listen="0.0.0.0",
+            port=Config.PORT,
+            webhook_url=webhook_url,
+            webhook_path=webhook_path
+        )
+    asyncio.run(main())
