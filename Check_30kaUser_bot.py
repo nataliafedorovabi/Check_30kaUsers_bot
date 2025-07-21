@@ -77,31 +77,16 @@ user_states = {}  # Состояния пошагового ввода
 
 # Утилиты для работы с асинхронностью
 def run_async_in_thread(async_func, timeout=30):
-    """Запускает асинхронную функцию в отдельном потоке"""
-    result = []
-    error = []
-    
     def thread_worker():
         try:
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            new_loop.run_until_complete(async_func())
-            new_loop.close()
-            result.append("success")
+            asyncio.run(async_func())  # безопасный способ запуска корутины
+            logger.info("Async processing completed successfully")
         except Exception as e:
-            error.append(str(e))
             logger.error(f"Error in async thread: {e}")
-    
+
     thread = threading.Thread(target=thread_worker)
     thread.start()
     thread.join(timeout=timeout)
-    
-    if error:
-        logger.error(f"Async processing failed: {error[0]}")
-    elif result:
-        logger.info("Async processing completed successfully")
-    else:
-        logger.warning(f"Async processing timed out after {timeout}s")
 
 # База данных
 @contextmanager
