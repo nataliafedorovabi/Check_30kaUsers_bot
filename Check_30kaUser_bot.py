@@ -70,6 +70,9 @@ if missing_vars:
 # Flask-приложение
 app = Flask(__name__)
 
+# Whitelist проверенных пользователей (временное хранение)
+verified_users = set()
+
 # Контекстный менеджер для подключения к БД
 @contextmanager
 def get_db_connection():
@@ -404,6 +407,68 @@ def webhook():
                     logger.error(f"Error in run_sync: {e}")
             
             run_sync()
+        elif update.message and update.message.chat.type.name == 'PRIVATE':
+            # Обрабатываем личные сообщения с данными пользователя
+            logger.info("Processing private message with user data")
+            user_id = update.message.from_user.id
+            text = update.message.text or ""
+            
+            logger.info(f"Received private message from {user_id}: {text}")
+            
+            # Парсим данные
+            fio, year, klass = parse_text(text)
+            
+            if fio and year and klass:
+                # Проверяем пользователя в базе
+                if check_user(fio, year, klass):
+                    response = (
+                        f"✅ Отлично! Вы найдены в базе выпускников:\n"
+                        f"ФИО: {fio}\n"
+                        f"Год: {year}\n"
+                        f"Класс: {klass}\n\n"
+                        f"Теперь подайте заявку на вступление в группу - она будет одобрена автоматически."
+                    )
+                else:
+                    response = (
+                        f"❌ К сожалению, в базе не найден:\n"
+                        f"ФИО: {fio}\n"
+                        f"Год: {year}\n"
+                        f"Класс: {klass}\n\n"
+                        f"Проверьте правильность данных или обратитесь к администратору."
+                    )
+            else:
+                response = (
+                    "Неполные данные! Пожалуйста, отправьте в формате:\n\n"
+                    "ФИО: Ваше Имя Фамилия\n"
+                    "Год: 2015\n"
+                    "Класс: 3"
+                )
+            
+            # Отправляем ответ
+            try:
+                import asyncio
+                
+                async def send_response():
+                    from telegram.ext import CallbackContext
+                    context = CallbackContext(application=telegram_app)
+                    await context.bot.send_message(chat_id=user_id, text=response)
+                    logger.info(f"Sent response to user {user_id}")
+                
+                def run_response():
+                    try:
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        new_loop.run_until_complete(send_response())
+                        new_loop.close()
+                    except Exception as e:
+                        logger.error(f"Error sending response: {e}")
+                
+                import threading
+                thread = threading.Thread(target=run_response)
+                thread.start()
+                
+            except Exception as e:
+                logger.error(f"Error processing private message: {e}")
         else:
             logger.info("No chat_join_request found in update")
         
