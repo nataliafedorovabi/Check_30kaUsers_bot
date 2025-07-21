@@ -275,11 +275,18 @@ def check_user(fio, year, klass):
     return False
 
 # Telegram утилиты
-async def send_message(user_id, text, telegram_app, reply_markup=None):
+async def send_message(user_id, text, context_or_app, reply_markup=None):
     """Универсальная отправка сообщений"""
     try:
-        context = CallbackContext(application=telegram_app)
-        await context.bot.send_message(
+        # Определяем тип объекта и получаем bot
+        if hasattr(context_or_app, 'bot'):  # Context
+            bot = context_or_app.bot
+        elif hasattr(context_or_app, '_bot'):  # Application
+            bot = context_or_app._bot
+        else:  # Предполагаем что это bot
+            bot = context_or_app
+        
+        await bot.send_message(
             chat_id=user_id, 
             text=text,
             reply_markup=reply_markup
@@ -288,7 +295,7 @@ async def send_message(user_id, text, telegram_app, reply_markup=None):
     except Exception as e:
         logger.error(f"Error sending message to {user_id}: {e}")
 
-async def send_not_found_message(user_id, fio, year, klass, telegram_app):
+async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     """Отправляет сообщение о том что пользователь не найден с кнопкой админа"""
     message = (
         f"❌ К сожалению, в базе выпускников не найден:\n"
@@ -309,7 +316,7 @@ async def send_not_found_message(user_id, fio, year, klass, telegram_app):
         )]
     ])
     
-    await send_message(user_id, message, telegram_app, keyboard)
+    await send_message(user_id, message, context_or_app, keyboard)
 
 def create_instruction_message():
     """Создает стандартное сообщение с инструкциями"""
@@ -357,7 +364,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )]
             ])
             
-            await send_message(user_id, create_instruction_message(), telegram_app, keyboard)
+            await send_message(user_id, create_instruction_message(), context, keyboard)
             return
         
         # Парсим данные из bio
@@ -375,7 +382,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         else:
             logger.info(f"Declining request from {user_id}: user not found")
             await context.bot.decline_chat_join_request(chat_id, user_id)
-            await send_not_found_message(user_id, fio, year, klass, telegram_app)
+            await send_not_found_message(user_id, fio, year, klass, context)
             
     except Exception as e:
         logger.error(f"Error handling join request: {e}")
