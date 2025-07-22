@@ -49,7 +49,6 @@ class Config:
     DB_PASSWORD = get_env_var("DB_PASSWORD")
     DB_TABLE = get_env_var("DB_TABLE", "cms_users")
     WEBHOOK_URL = get_env_var("WEBHOOK_URL")
-    GROUP_ID = get_env_var("GROUP_ID", 0, int)
     PORT = get_env_var("PORT", 10000, int)
     ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
 
@@ -454,7 +453,7 @@ async def handle_private_message(user_id, text, telegram_app):
     else:
         await send_message(user_id, INCOMPLETE_DATA_MESSAGE, telegram_app)
 
-async def handle_step_input(user_id, text, telegram_app):
+async def handle_step_input(user_id, text, telegram_app, chat_id=None):
     try:
         state = user_states[user_id]
         step = state['step']
@@ -498,36 +497,37 @@ async def handle_step_input(user_id, text, telegram_app):
                 await send_message(user_id, response, telegram_app)
                 # Отправить админу уведомление о принятии
                 try:
-                    chat_id = Config.GROUP_ID
-                    chat_info = await telegram_app.bot.get_chat(chat_id)
-                    group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
-                    admin_msg = (
-                        f"В чат '{group_title}' принят новый пользователь:\n"
-                        f"ФИ: {fio}\n"
-                        f"Год выпуска: {year}\n"
-                        f"Класс: {klass}\n"
-                        f"Кл.руководитель: {teacher}"
-                    )
-                    if Config.ADMIN_ID:
-                        await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+                    # chat_id должен быть передан явно
+                    if chat_id is not None:
+                        chat_info = await telegram_app.bot.get_chat(chat_id)
+                        group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
+                        admin_msg = (
+                            f"В чат '{group_title}' принят новый пользователь:\n"
+                            f"ФИ: {fio}\n"
+                            f"Год выпуска: {year}\n"
+                            f"Класс: {klass}\n"
+                            f"Кл.руководитель: {teacher}"
+                        )
+                        if Config.ADMIN_ID:
+                            await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
                 except Exception as e:
                     logger.error(f"Ошибка при отправке уведомления админу: {e}")
             else:
                 await send_not_found_message(user_id, fio, year, klass, telegram_app)
                 # Отправить админу уведомление об отказе
                 try:
-                    chat_id = Config.GROUP_ID
-                    chat_info = await telegram_app.bot.get_chat(chat_id)
-                    group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
-                    admin_msg = (
-                        f"В чат '{group_title}' постучался пользователь, но не был найден в базе и был отклонен:\n"
-                        f"ФИ: {fio}\n"
-                        f"Год выпуска: {year}\n"
-                        f"Класс: {klass}\n"
-                        f"Кл.руководитель: {teacher}"
-                    )
-                    if Config.ADMIN_ID:
-                        await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+                    if chat_id is not None:
+                        chat_info = await telegram_app.bot.get_chat(chat_id)
+                        group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
+                        admin_msg = (
+                            f"В чат '{group_title}' постучался пользователь, но не был найден в базе и был отклонен:\n"
+                            f"ФИ: {fio}\n"
+                            f"Год выпуска: {year}\n"
+                            f"Класс: {klass}\n"
+                            f"Кл.руководитель: {teacher}"
+                        )
+                        if Config.ADMIN_ID:
+                            await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
                 except Exception as e:
                     logger.error(f"Ошибка при отправке уведомления админу: {e}")
             return
