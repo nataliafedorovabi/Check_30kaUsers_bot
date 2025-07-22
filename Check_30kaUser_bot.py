@@ -502,7 +502,7 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
                         chat_info = await telegram_app.bot.get_chat(chat_id)
                         group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
                         admin_msg = (
-                            f"В чат '{group_title}' принят новый пользователь:\n"
+                            f"В чат '{group_title}' принят новый пользователь {username}:\n"
                             f"ФИ: {fio}\n"
                             f"Год выпуска: {year}\n"
                             f"Класс: {klass}\n"
@@ -520,7 +520,7 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
                         chat_info = await telegram_app.bot.get_chat(chat_id)
                         group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
                         admin_msg = (
-                            f"В чат '{group_title}' постучался пользователь, но не был найден в базе и был отклонен:\n"
+                            f"В чат '{group_title}' постучался пользователь {username}, но не был найден в базе и был отклонен:\n"
                             f"ФИ: {fio}\n"
                             f"Год выпуска: {year}\n"
                             f"Класс: {klass}\n"
