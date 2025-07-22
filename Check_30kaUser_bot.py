@@ -285,7 +285,7 @@ async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     message = (
         "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n\n"
         f"Админ чата Сергей Федоров {admin_username} с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением.\n\n"
-        f"Если ты точно выпускник ФМЛ 30, напиши Сергею в личку {admin_username} — мы обязательно разберёмся!\n"
+        f"Если ты точно выпускник(ца) ФМЛ 30, напиши Сергею в личку {admin_username} — мы обязательно разберёмся!\n"
         "Или попробуй еще раз /start"
     )
     await send_message(user_id, message, context_or_app)
@@ -314,7 +314,7 @@ def make_success_message(fio, year, klass, teacher=None, admin_username=None):
     if admin_username is None:
         admin_username = "admin"
     return (
-        "✅ Рад знакомству! Ты найден в базе выпускников:\n"
+        "✅ Рад знакомству! Ты найден(а) в базе выпускников:\n"
         f"ФИО: {fio}\n"
         f"Год: {year}\n"
         f"Класс: {klass}\n"
