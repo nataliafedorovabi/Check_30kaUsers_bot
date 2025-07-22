@@ -262,8 +262,9 @@ async def send_message(user_id, text, context_or_app, reply_markup=None):
 
 # === ТЕКСТОВЫЕ СООБЩЕНИЯ ===
 NOT_FOUND_MESSAGE = (
-    "К сожалению, мы не нашли тебя в базе данных.\n"
-    "Если ты точно выпускник ОШБ, напиши администратору @{admin_id} — мы обязательно разберёмся!\n"
+    "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n"
+    "Админ чата Сергей Федоров с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением."
+    "Если ты точно выпускник ФМЛ 30, напиши Сергею в личку @{admin_id} — мы обязательно разберёмся!\n"
     "Или попробуй еще раз /start"
 )
 INSTRUCTION_MESSAGE = (
@@ -282,6 +283,37 @@ def create_instruction_message():
 # Глобальные переменные
 verified_users = set()  # Whitelist проверенных пользователей
 user_states = {}        # Состояния пошагового ввода
+
+SUCCESS_MESSAGE_ADMIN = (
+    "✅ Рад знакомству! Ты найден в базе выпускников:\n"
+    "ФИО: {fio}\n"
+    "Год: {year}\n"
+    "Класс: {klass}\n"
+    "{teacher_block}"
+    "Теперь подай заявку на вступление в чат - она будет одобрена автоматически.\n\n"
+    "Ссылка на чат: https://t.me/test_bots_nf\n"
+    "Админ чата Сергей Федоров, 1983-2, @{admin_id}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru , чату, школе  - не стесняйся мне их задавать!"
+)
+INCOMPLETE_DATA_MESSAGE = (
+    "Неполные данные!\n\n"
+    "Ты можешь отправить данные в любом из форматов:\n\n"
+    "1️⃣ Одной строкой: Федоров Сергей 2010 2\n\n"
+    "2️⃣ С двоеточиями:\n"
+    "ФИО: Ваше Имя Фамилия\n"
+    "Год: 2015\n"
+    "Класс: 3\n\n"
+    "3️⃣ Или отправь /start для пошагового ввода"
+)
+
+def make_success_message(fio, year, klass, teacher=None):
+    teacher_block = f"Классный руководитель: {teacher}\n" if teacher and teacher != '-' else ""
+    return SUCCESS_MESSAGE_ADMIN.format(
+        fio=fio,
+        year=year,
+        klass=klass,
+        teacher_block=teacher_block,
+        admin_id=Config.ADMIN_ID
+    )
 
 async def handle_private_message_entrypoint(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -311,7 +343,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
-                    await send_message(user_id, "Произошла ошибка при одобрении вашей заявки. Пожалуйста, попробуйте позже или напишите администратору @{admin_id}.", context)
+                    await send_message(user_id, "Произошла ошибка при одобрении заявки. Пожалуйста, попробуй позже или напиши администратору @{admin_id}.", context)
                 except Exception as e2:
                     logger.error(f"Error sending error message to user: {e2}")
             return
@@ -323,7 +355,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             username = f"@{user_info.username}" if user_info.username else user_info.first_name
             try:
                 bot_info = await context.bot.get_me()
-                group_message = f"Привет {username}, рады видеть! Для вступления в группу выпускников ФМЛ 30, перейди в личку @{bot_info.username} и нажми start. Бот сверится с БД лицея."
+                group_message = f"Привет {username}, рады видеть! Для вступления в чат выпускников ФМЛ 30, перейди в личку @{bot_info.username} и нажми start. Бот сверится с БД лицея."
                 await context.bot.send_message(chat_id=chat_id, text=group_message)
                 logger.info(f"✅ Sent instruction message to group for {username}")
             except Exception as e:
@@ -331,7 +363,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.info(f"⏳ Pending request from {username} (user_id: {user_id})")
             # Удаляем/комментируем отправку сообщения в личку:
             # try:
-            #     await send_message(user_id, "Ваша заявка отклонена, так как не указано био. Пожалуйста, напишите боту в личные сообщения для подтверждения.", context)
+            #     await send_message(user_id, "Заявка отклонена, так как не указано био. Пожалуйста, напиши боту в личные сообщения для подтверждения.", context)
             # except Exception as e2:
             #     logger.error(f"Error sending decline message to user: {e2}")
             return
@@ -344,7 +376,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Error declining join request: {e}")
             try:
-                await send_message(user_id, "Ваша заявка отклонена, так как указаны неполные данные. Пожалуйста, напишите боту в личные сообщения для подтверждения.", context)
+                await send_message(user_id, "Заявка отклонена, так как указаны неполные данные. Пожалуйста, напиши боту в личные сообщения для подтверждения.", context)
             except Exception as e2:
                 logger.error(f"Error sending decline message to user: {e2}")
             return
@@ -357,7 +389,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
-                    await send_message(user_id, "Произошла ошибка при одобрении вашей заявки. Пожалуйста, попробуйте позже или напишите администратору.", context)
+                    await send_message(user_id, "Произошла ошибка при одобрении заявки. Пожалуйста, попробуй позже или напиши администратору @{admin_id}.", context)
                 except Exception as e2:
                     logger.error(f"Error sending error message to user: {e2}")
         else:
@@ -371,7 +403,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Error handling join request: {e}")
         try:
             user_id = update.chat_join_request.from_user.id
-            await send_message(user_id, "Произошла внутренняя ошибка при обработке вашей заявки. Пожалуйста, попробуйте позже или напишите администратору.", context)
+            await send_message(user_id, "Произошла внутренняя ошибка при обработке заявки. Пожалуйста, попробуй позже или напиши администратору @{admin_id}.", context)
         except Exception as e2:
             logger.error(f"Error sending error message to user: {e2}")
 
@@ -397,29 +429,12 @@ async def handle_private_message(user_id, text, telegram_app):
     if fio and year and klass:
         if check_user(fio, year, klass):
             verified_users.add(user_id)
-            response = (
-                f"✅ Отлично! Вы найдены в базе выпускников:\n"
-                f"ФИО: {fio}\n"
-                f"Год: {year}\n"
-                f"Класс: {klass}\n\n"
-                f"Теперь подайте заявку на вступление в группу - она будет одобрена автоматически.\n\n"
-                f"Ссылка на группу: https://t.me/test_bots_nf"
-            )
+            response = make_success_message(fio, year, klass)
             await send_message(user_id, response, telegram_app)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
     else:
-        response = (
-            "Неполные данные!\n\n"
-            "Вы можете отправить данные в любом из форматов:\n\n"
-            "1️⃣ Одной строкой: Федоров Сергей 2010 2\n\n"
-            "2️⃣ С двоеточиями:\n"
-            "ФИО: Ваше Имя Фамилия\n"
-            "Год: 2015\n"
-            "Класс: 3\n\n"
-            "3️⃣ Или отправьте /start для пошагового ввода"
-        )
-        await send_message(user_id, response, telegram_app)
+        await send_message(user_id, INCOMPLETE_DATA_MESSAGE, telegram_app)
 
 async def handle_step_input(user_id, text, telegram_app):
     try:
@@ -434,40 +449,69 @@ async def handle_step_input(user_id, text, telegram_app):
             if len(name_parts) >= 2:
                 state['data']['fio'] = text.strip()
                 state['step'] = 'waiting_year'
-                response = "Отлично! Теперь введите год окончания школы (например: 2015):"
+                response = "Отлично! Теперь введи год окончания школы (например: 2015):"
             else:
-                response = "Пожалуйста, введите имя и фамилию (например: Иван Петров):"
+                response = "Пожалуйста, введи имя и фамилию (например: Иван Петров):"
         elif step == 'waiting_year':
             if text.strip().isdigit() and 1950 <= int(text.strip()) <= 2030:
                 state['data']['year'] = text.strip()
                 state['step'] = 'waiting_class'
-                response = "Хорошо! Теперь введите номер класса (1-11):"
+                response = "Хорошо! Теперь введи номер класса (1-11):"
             else:
-                response = "Пожалуйста, введите корректный год (например: 2015):"
+                response = "Пожалуйста, введи корректный год (например: 2015):"
         elif step == 'waiting_class':
             if text.strip().isdigit() and 1 <= int(text.strip()) <= 11:
                 state['data']['class'] = text.strip()
-                fio = state['data']['fio']
-                year = state['data']['year']
-                klass = state['data']['class']
-                # Только после успешного завершения всех шагов удаляем состояние
-                del user_states[user_id]
-                if check_user(fio, year, klass):
-                    verified_users.add(user_id)
-                    response = (
-                        f"✅ Отлично! Вы найдены в базе выпускников:\n"
-                        f"ФИО: {fio}\n"
-                        f"Год: {year}\n"
-                        f"Класс: {klass}\n\n"
-                        f"Теперь подайте заявку на вступление в группу - она будет одобрена автоматически.\n\n"
-                        f"Ссылка на группу: https://t.me/test_bots_nf"
-                    )
-                    await send_message(user_id, response, telegram_app)
-                else:
-                    await send_not_found_message(user_id, fio, year, klass, telegram_app)
-                return
+                state['step'] = 'waiting_teacher'
+                response = "Если помнишь, напиши ФИ классного руководителя (или просто '-' если не помнишь):"
             else:
-                response = "Пожалуйста, введите корректный номер класса (1-11):"
+                response = "Пожалуйста, введи корректный номер класса (1-11):"
+        elif step == 'waiting_teacher':
+            state['data']['teacher'] = text.strip()
+            fio = state['data']['fio']
+            year = state['data']['year']
+            klass = state['data']['class']
+            teacher = state['data']['teacher']
+            del user_states[user_id]
+            if check_user(fio, year, klass):
+                verified_users.add(user_id)
+                response = make_success_message(fio, year, klass, teacher)
+                await send_message(user_id, response, telegram_app)
+                # Отправить админу уведомление о принятии
+                try:
+                    chat_id = Config.GROUP_ID
+                    chat_info = await telegram_app.bot.get_chat(chat_id)
+                    group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
+                    admin_msg = (
+                        f"В чат '{group_title}' принят новый пользователь:\n"
+                        f"ФИ: {fio}\n"
+                        f"Год выпуска: {year}\n"
+                        f"Класс: {klass}\n"
+                        f"Кл.руководитель: {teacher}"
+                    )
+                    if Config.ADMIN_ID:
+                        await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке уведомления админу: {e}")
+            else:
+                await send_not_found_message(user_id, fio, year, klass, telegram_app)
+                # Отправить админу уведомление об отказе
+                try:
+                    chat_id = Config.GROUP_ID
+                    chat_info = await telegram_app.bot.get_chat(chat_id)
+                    group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
+                    admin_msg = (
+                        f"В чат '{group_title}' постучался пользователь, но не был найден в базе и был отклонен:\n"
+                        f"ФИ: {fio}\n"
+                        f"Год выпуска: {year}\n"
+                        f"Класс: {klass}\n"
+                        f"Кл.руководитель: {teacher}"
+                    )
+                    if Config.ADMIN_ID:
+                        await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке уведомления админу: {e}")
+            return
         await send_message(user_id, response, telegram_app)
     except Exception as e:
         logger.error(f"Error in step input: {e}")
@@ -478,9 +522,8 @@ async def start_step_input(user_id, telegram_app):
     """Начинает пошаговый ввод данных"""
     user_states[user_id] = {'step': 'waiting_name', 'data': {}}
     response = (
-        "👋 Привет! Я бот для проверки выпускников ФМЛ 30.\n\n"
-        "Это админ чата Сергей Федоров, 1983-2.\n\n"
-        "Для вступления в группу выпускников необходимо подтвердить что ты учился в школе.\n\n"
+        "👋 Привет! Спасибо за заявку в чате выпускников 30ки. Я бот для проверки выпускников ФМЛ 30.\n\n"
+        "Для доступа в чат необходимо подтвердить что ты учился в лицее.\n\n"
         "Отправь мне твою фамилию и имя:"
     )
     await send_message(user_id, response, telegram_app)
