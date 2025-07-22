@@ -51,7 +51,7 @@ class Config:
     WEBHOOK_URL = get_env_var("WEBHOOK_URL")
     GROUP_ID = get_env_var("GROUP_ID", 0, int)
     PORT = get_env_var("PORT", 10000, int)
-    ADMIN_ID = get.env_var("ADMIN_ID", 0, int)
+    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
 
 # Проверяем наличие обязательных переменных
 required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
