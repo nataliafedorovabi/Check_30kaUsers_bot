@@ -5,7 +5,7 @@ import psycopg2.extras
 import logging
 from contextlib import contextmanager
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, ChatJoinRequestHandler, CallbackContext
+from telegram.ext import ApplicationBuilder, ContextTypes, ChatJoinRequestHandler, CallbackContext, MessageHandler, CommandHandler, filters
 
 # Загружаем переменные окружения из .env файла (для локальной разработки)
 try:
@@ -51,7 +51,7 @@ class Config:
     WEBHOOK_URL = get_env_var("WEBHOOK_URL")
     GROUP_ID = get_env_var("GROUP_ID", 0, int)
     PORT = get_env_var("PORT", 10000, int)
-    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
+    ADMIN_ID = get.env_var("ADMIN_ID", 0, int)
 
 # Проверяем наличие обязательных переменных
 required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
@@ -299,6 +299,15 @@ def create_instruction_message():
 verified_users = set()  # Whitelist проверенных пользователей
 user_states = {}        # Состояния пошагового ввода
 
+async def handle_private_message_entrypoint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text or ""
+    await handle_private_message(user_id, text, context)
+
+async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    await handle_private_message(user_id, "/start", context)
+
 # Обработчики
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает заявки на вступление в группу"""
@@ -330,16 +339,17 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             username = f"@{user_info.username}" if user_info.username else user_info.first_name
             try:
                 bot_info = await context.bot.get_me()
-                group_message = f"👋 {username}, для вступления в группу выпускников ФМЛ 30, перейди в личку @{bot_info.username} и нажми /start. Бот сверится с БД."
+                group_message = f"👋 {username}, для вступления в группу выпускников ФМЛ 30, перейди в личку @{bot_info.username} и напиши start. Бот сверится с БД."
                 await context.bot.send_message(chat_id=chat_id, text=group_message)
                 logger.info(f"✅ Sent instruction message to group for {username}")
             except Exception as e:
                 logger.error(f"❌ Could not send group message for {username}: {e}")
                 logger.info(f"⏳ Pending request from {username} (user_id: {user_id})")
-            try:
-                await send_message(user_id, "Ваша заявка отклонена, так как не указано био. Пожалуйста, напишите боту в личные сообщения для подтверждения.", context)
-            except Exception as e2:
-                logger.error(f"Error sending decline message to user: {e2}")
+            # Удаляем/комментируем отправку сообщения в личку:
+            # try:
+            #     await send_message(user_id, "Ваша заявка отклонена, так как не указано био. Пожалуйста, напишите боту в личные сообщения для подтверждения.", context)
+            # except Exception as e2:
+            #     logger.error(f"Error sending decline message to user: {e2}")
             return
         # Парсим данные из bio
         fio, year, klass = parse_text(bio)
@@ -539,6 +549,8 @@ async def handle_callback_query(update, telegram_app):
 try:
     telegram_app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
     telegram_app.add_handler(ChatJoinRequestHandler(handle_join_request))
+    telegram_app.add_handler(CommandHandler("start", handle_start_command))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, handle_private_message_entrypoint))
     logger.info("Telegram application initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize Telegram application: {e}")
