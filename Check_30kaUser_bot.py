@@ -51,7 +51,7 @@ class Config:
     WEBHOOK_URL = get_env_var("WEBHOOK_URL")
     GROUP_ID = get_env_var("GROUP_ID", 0, int)
     PORT = get_env_var("PORT", 10000, int)
-    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
+    ADMIN_ID = get.env_var("ADMIN_ID", 0, int)
 
 # Проверяем наличие обязательных переменных
 required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
@@ -263,7 +263,7 @@ async def send_message(user_id, text, context_or_app, reply_markup=None):
 # === ТЕКСТОВЫЕ СООБЩЕНИЯ ===
 NOT_FOUND_MESSAGE = (
     "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n"
-    "Админ чата Сергей Федоров с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением."
+    "Админ чата Сергей Федоров @{admin_id} с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением.\n"
     "Если ты точно выпускник ФМЛ 30, напиши Сергею в личку @{admin_id} — мы обязательно разберёмся!\n"
     "Или попробуй еще раз /start"
 )
@@ -271,9 +271,31 @@ INSTRUCTION_MESSAGE = (
     "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
 )
 
+async def get_admin_mention(bot):
+    try:
+        admin_id = Config.ADMIN_ID
+        if not admin_id:
+            return "[админ](https://t.me/)"  # fallback
+        admin_user = await bot.get_chat(admin_id)
+        if getattr(admin_user, 'username', None):
+            return f"[@{admin_user.username}](https://t.me/{admin_user.username})"
+        else:
+            # Если username нет, используем имя
+            name = admin_user.first_name or "админ"
+            return f"[{name}](tg://user?id={admin_id})"
+    except Exception as e:
+        logger.error(f"Не удалось получить ссылку на админа: {e}")
+        return "[админ](https://t.me/)"
+
 async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     """Отправляет сообщение о том что пользователь не найден (без кнопки, с ником админа)"""
-    message = NOT_FOUND_MESSAGE
+    admin_mention = await get_admin_mention(context_or_app.bot if hasattr(context_or_app, 'bot') else context_or_app)
+    message = (
+        "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n"
+        f"Админ чата Сергей Федоров {admin_mention} с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением.\n"
+        f"Если ты точно выпускник ФМЛ 30, напиши Сергею в личку {admin_mention} — мы обязательно разберёмся!\n"
+        "Или попробуй еще раз /start"
+    )
     await send_message(user_id, message, context_or_app)
 
 def create_instruction_message():
@@ -290,9 +312,8 @@ SUCCESS_MESSAGE_ADMIN = (
     "Год: {year}\n"
     "Класс: {klass}\n"
     "{teacher_block}"
-    "Теперь подай заявку на вступление в чат - она будет одобрена автоматически.\n\n"
-    "Ссылка на чат: https://t.me/test_bots_nf\n"
-    "Админ чата Сергей Федоров, 1983-2, @{admin_id}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru , чату, школе  - не стесняйся мне их задавать!"
+    "Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: https://t.me/test_bots_nf\n\n"
+    "Админ чата Сергей Федоров, 1983-2, @{admin_id}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся мне их задавать!"
 )
 INCOMPLETE_DATA_MESSAGE = (
     "Неполные данные!\n\n"
@@ -305,14 +326,18 @@ INCOMPLETE_DATA_MESSAGE = (
     "3️⃣ Или отправь /start для пошагового ввода"
 )
 
-def make_success_message(fio, year, klass, teacher=None):
-    teacher_block = f"Классный руководитель: {teacher}\n" if teacher and teacher != '-' else ""
-    return SUCCESS_MESSAGE_ADMIN.format(
-        fio=fio,
-        year=year,
-        klass=klass,
-        teacher_block=teacher_block,
-        admin_id=Config.ADMIN_ID
+def make_success_message(fio, year, klass, teacher=None, admin_mention=None):
+    teacher_block = f"Классный руководитель: {teacher}\n\n" if teacher and teacher != '-' else ""
+    if admin_mention is None:
+        admin_mention = "[админ](https://t.me/)"
+    return (
+        "✅ Рад знакомству! Ты найден в базе выпускников:\n"
+        f"ФИО: {fio}\n"
+        f"Год: {year}\n"
+        f"Класс: {klass}\n"
+        f"{teacher_block}"
+        "Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: https://t.me/test_bots_nf\n\n"
+        f"Админ чата Сергей Федоров, 1983-2, {admin_mention}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся мне их задавать!"
     )
 
 async def handle_private_message_entrypoint(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -408,28 +433,30 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error(f"Error sending error message to user: {e2}")
 
 async def handle_private_message(user_id, text, telegram_app):
+    # Исключение для админа
+    if user_id == Config.ADMIN_ID and text.strip().lower() == '/start':
+        await send_message(user_id, "Привет, я проверяю заявки в чате выпускников 30ки. Сюда будут приходить одобренные и отклонённые заявки.", telegram_app)
+        return
     # Если пользователь в процессе пошагового ввода — только handle_step_input!
     if user_id in user_states:
         await handle_step_input(user_id, text, telegram_app)
         return
-
     # Команда /start или первое сообщение
     if text.strip().lower() == '/start':
         await start_step_input(user_id, telegram_app)
         return
-
     # Если пользователь написал что-то кроме данных, показываем приветствие
     if not parse_text(text)[0]:  # Если не смогли распарсить данные
         welcome_message = create_instruction_message()
         await send_message(user_id, welcome_message, telegram_app)
         return
-
     # Парсинг данных
     fio, year, klass = parse_text(text)
     if fio and year and klass:
         if check_user(fio, year, klass):
             verified_users.add(user_id)
-            response = make_success_message(fio, year, klass)
+            admin_mention = await get_admin_mention(telegram_app.bot)
+            response = make_success_message(fio, year, klass, admin_mention=admin_mention)
             await send_message(user_id, response, telegram_app)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
@@ -475,7 +502,8 @@ async def handle_step_input(user_id, text, telegram_app):
             del user_states[user_id]
             if check_user(fio, year, klass):
                 verified_users.add(user_id)
-                response = make_success_message(fio, year, klass, teacher)
+                admin_mention = await get_admin_mention(telegram_app.bot)
+                response = make_success_message(fio, year, klass, teacher, admin_mention)
                 await send_message(user_id, response, telegram_app)
                 # Отправить админу уведомление о принятии
                 try:
@@ -522,7 +550,7 @@ async def start_step_input(user_id, telegram_app):
     """Начинает пошаговый ввод данных"""
     user_states[user_id] = {'step': 'waiting_name', 'data': {}}
     response = (
-        "👋 Привет! Спасибо за заявку в чате выпускников 30ки. Я бот для проверки выпускников ФМЛ 30.\n\n"
+        "👋 Привет! Спасибо за заявку в чате выпускников 30ки.\n\n"
         "Для доступа в чат необходимо подтвердить что ты учился в лицее.\n\n"
         "Отправь мне твою фамилию и имя:"
     )
