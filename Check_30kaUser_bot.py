@@ -261,12 +261,6 @@ async def send_message(user_id, text, context_or_app, reply_markup=None):
         logger.error(f"Error sending message to {user_id}: {e}")
 
 # === ТЕКСТОВЫЕ СООБЩЕНИЯ ===
-NOT_FOUND_MESSAGE = (
-    "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n\n"
-    "Админ чата Сергей Федоров @{admin_id} с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением.\n\n"
-    "Если ты точно выпускник ФМЛ 30, напиши Сергею в личку @{admin_id} — мы обязательно разберёмся!\n"
-    "Или попробуй еще раз /start"
-)
 INSTRUCTION_MESSAGE = (
     "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
 )
@@ -287,13 +281,27 @@ async def get_admin_mention(bot):
         logger.error(f"Не удалось получить ссылку на админа: {e}")
         return "Админ Сергей"
 
+async def get_admin_username(bot):
+    try:
+        admin_id = Config.ADMIN_ID
+        if not admin_id:
+            return "admin"
+        admin_user = await bot.get_chat(admin_id)
+        if getattr(admin_user, 'username', None):
+            return f"@{admin_user.username}"
+        else:
+            return "admin"
+    except Exception as e:
+        logger.error(f"Не удалось получить username админа: {e}")
+        return "admin"
+
 async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     """Отправляет сообщение о том что пользователь не найден (без кнопки, с ником админа)"""
-    admin_mention = await get_admin_mention(context_or_app.bot if hasattr(context_or_app, 'bot') else context_or_app)
+    admin_username = await get_admin_username(context_or_app.bot if hasattr(context_or_app, 'bot') else context_or_app)
     message = (
-        "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n"
-        f"Админ чата Сергей Федоров {admin_mention} с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением.\n"
-        f"Если ты точно выпускник ФМЛ 30, напиши Сергею в личку {admin_mention} — мы обязательно разберёмся!\n"
+        "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n\n"
+        f"Админ чата Сергей Федоров {admin_username} с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением.\n\n"
+        f"Если ты точно выпускник ФМЛ 30, напиши Сергею в личку {admin_username} — мы обязательно разберёмся!\n"
         "Или попробуй еще раз /start"
     )
     await send_message(user_id, message, context_or_app)
@@ -613,4 +621,3 @@ if __name__ == "__main__":
         port=Config.PORT,
         webhook_url=webhook_url
     )
-
