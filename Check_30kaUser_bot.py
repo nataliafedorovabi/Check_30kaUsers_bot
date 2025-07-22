@@ -51,7 +51,7 @@ class Config:
     WEBHOOK_URL = get_env_var("WEBHOOK_URL")
     GROUP_ID = get_env_var("GROUP_ID", 0, int)
     PORT = get_env_var("PORT", 10000, int)
-    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
+    ADMIN_ID = get.env_var("ADMIN_ID", 0, int)
 
 # Проверяем наличие обязательных переменных
 required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
@@ -546,8 +546,6 @@ WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else "/"
 
 if __name__ == "__main__":
     webhook_url = f"{Config.WEBHOOK_URL}/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else f"{Config.WEBHOOK_URL}/"
-    # Синхронно устанавливаем webhook (PTB позволяет так делать)
-    telegram_app.bot.set_webhook(webhook_url)
     logger.info(f"Webhook set to {webhook_url}")
     telegram_app.run_webhook(
         listen="0.0.0.0",
