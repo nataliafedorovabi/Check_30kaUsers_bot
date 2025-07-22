@@ -435,6 +435,11 @@ async def handle_private_message(user_id, text, telegram_app):
     if text.strip().lower() == '/start':
         await start_step_input(user_id, telegram_app)
         return
+    # --- Новое: если пользователь не в user_states и написал только два слова (ФИО), запускаем пошаговый сценарий ---
+    name_parts = text.strip().split()
+    if len(name_parts) == 2 and all(part.isalpha() for part in name_parts):
+        await start_step_input(user_id, telegram_app)
+        return
     # Если пользователь написал что-то кроме данных, показываем приветствие
     if not parse_text(text)[0]:  # Если не смогли распарсить данные
         welcome_message = create_instruction_message()
@@ -448,8 +453,26 @@ async def handle_private_message(user_id, text, telegram_app):
             admin_username = await get_admin_username(telegram_app.bot)
             response = make_success_message(fio, year, klass, admin_username=admin_username)
             await send_message(user_id, response, telegram_app)
+            # --- Новое: уведомление админу ---
+            if Config.ADMIN_ID:
+                admin_msg = (
+                    f"✅ Новый пользователь одобрен:\n"
+                    f"ФИО: {fio}\n"
+                    f"Год выпуска: {year}\n"
+                    f"Класс: {klass}\n"
+                )
+                await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
+            # --- Новое: уведомление админу об отказе ---
+            if Config.ADMIN_ID:
+                admin_msg = (
+                    f"❌ Пользователь не найден в базе:\n"
+                    f"ФИО: {fio}\n"
+                    f"Год выпуска: {year}\n"
+                    f"Класс: {klass}\n"
+                )
+                await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
     else:
         await send_message(user_id, INCOMPLETE_DATA_MESSAGE, telegram_app)
 
@@ -495,41 +518,28 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
                 admin_username = await get_admin_username(telegram_app.bot)
                 response = make_success_message(fio, year, klass, teacher, admin_username)
                 await send_message(user_id, response, telegram_app)
-                # Отправить админу уведомление о принятии
-                try:
-                    # chat_id должен быть передан явно
-                    if chat_id is not None:
-                        chat_info = await telegram_app.bot.get_chat(chat_id)
-                        group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
-                        admin_msg = (
-                            f"В чат '{group_title}' принят новый пользователь {username}:\n"
-                            f"ФИ: {fio}\n"
-                            f"Год выпуска: {year}\n"
-                            f"Класс: {klass}\n"
-                            f"Кл.руководитель: {teacher}"
-                        )
-                        if Config.ADMIN_ID:
-                            await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
-                except Exception as e:
-                    logger.error(f"Ошибка при отправке уведомления админу: {e}")
+                # --- Новое: уведомление админу ---
+                if Config.ADMIN_ID:
+                    admin_msg = (
+                        f"✅ Новый пользователь одобрен:\n"
+                        f"ФИО: {fio}\n"
+                        f"Год выпуска: {year}\n"
+                        f"Класс: {klass}\n"
+                        f"Кл.руководитель: {teacher}"
+                    )
+                    await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
             else:
                 await send_not_found_message(user_id, fio, year, klass, telegram_app)
-                # Отправить админу уведомление об отказе
-                try:
-                    if chat_id is not None:
-                        chat_info = await telegram_app.bot.get_chat(chat_id)
-                        group_title = chat_info.title if hasattr(chat_info, 'title') else str(chat_id)
-                        admin_msg = (
-                            f"В чат '{group_title}' постучался пользователь {username}, но не был найден в базе и был отклонен:\n"
-                            f"ФИ: {fio}\n"
-                            f"Год выпуска: {year}\n"
-                            f"Класс: {klass}\n"
-                            f"Кл.руководитель: {teacher}"
-                        )
-                        if Config.ADMIN_ID:
-                            await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
-                except Exception as e:
-                    logger.error(f"Ошибка при отправке уведомления админу: {e}")
+                # --- Новое: уведомление админу об отказе ---
+                if Config.ADMIN_ID:
+                    admin_msg = (
+                        f"❌ Пользователь не найден в базе:\n"
+                        f"ФИО: {fio}\n"
+                        f"Год выпуска: {year}\n"
+                        f"Класс: {klass}\n"
+                        f"Кл.руководитель: {teacher}"
+                    )
+                    await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
             return
         await send_message(user_id, response, telegram_app)
     except Exception as e:
