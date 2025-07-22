@@ -434,7 +434,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_private_message(user_id, text, telegram_app):
     # Исключение для админа
-    if user_id == Config.ADMIN_ID and text.strip().lower() == '/start':
+    if int(user_id) == int(Config.ADMIN_ID) and text.strip().lower() == '/start':
         await send_message(user_id, "Привет, я проверяю заявки в чате выпускников 30ки. Сюда будут приходить одобренные и отклонённые заявки.", telegram_app)
         return
     # Если пользователь в процессе пошагового ввода — только handle_step_input!
