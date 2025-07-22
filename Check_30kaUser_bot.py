@@ -263,7 +263,8 @@ async def send_message(user_id, text, context_or_app, reply_markup=None):
 # === ТЕКСТОВЫЕ СООБЩЕНИЯ ===
 NOT_FOUND_MESSAGE = (
     "К сожалению, мы не нашли тебя в базе данных.\n"
-    "Если ты точно выпускник ОШБ, напиши администратору @your_admin_username — мы обязательно разберёмся!"
+    "Если ты точно выпускник ОШБ, напиши администратору @{admin_id} — мы обязательно разберёмся!\n"
+    "Или попробуй еще раз /start"
 )
 INSTRUCTION_MESSAGE = (
     "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
@@ -310,7 +311,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
-                    await send_message(user_id, "Произошла ошибка при одобрении вашей заявки. Пожалуйста, попробуйте позже или напишите администратору.", context)
+                    await send_message(user_id, "Произошла ошибка при одобрении вашей заявки. Пожалуйста, попробуйте позже или напишите администратору @{admin_id}.", context)
                 except Exception as e2:
                     logger.error(f"Error sending error message to user: {e2}")
             return
@@ -322,7 +323,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             username = f"@{user_info.username}" if user_info.username else user_info.first_name
             try:
                 bot_info = await context.bot.get_me()
-                group_message = f"👋 {username}, для вступления в группу выпускников ФМЛ 30, перейди в личку @{bot_info.username} и напиши start. Бот сверится с БД."
+                group_message = f"Привет {username}, рады видеть! Для вступления в группу выпускников ФМЛ 30, перейди в личку @{bot_info.username} и нажми start. Бот сверится с БД лицея."
                 await context.bot.send_message(chat_id=chat_id, text=group_message)
                 logger.info(f"✅ Sent instruction message to group for {username}")
             except Exception as e:
