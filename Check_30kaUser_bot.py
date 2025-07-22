@@ -265,22 +265,6 @@ INSTRUCTION_MESSAGE = (
     "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
 )
 
-async def get_admin_mention(bot):
-    try:
-        admin_id = Config.ADMIN_ID
-        if not admin_id:
-            return "Админ Сергей"  # fallback
-        admin_user = await bot.get_chat(admin_id)
-        if getattr(admin_user, 'username', None):
-            return f"Админ Сергей @{admin_user.username}"
-        else:
-            # Если username нет, используем имя
-            name = admin_user.first_name or "Админ Сергей"
-            return f"{name} (tg://user?id={admin_id})"
-    except Exception as e:
-        logger.error(f"Не удалось получить ссылку на админа: {e}")
-        return "Админ Сергей"
-
 async def get_admin_username(bot):
     try:
         admin_id = Config.ADMIN_ID
@@ -314,15 +298,6 @@ def create_instruction_message():
 verified_users = set()  # Whitelist проверенных пользователей
 user_states = {}        # Состояния пошагового ввода
 
-SUCCESS_MESSAGE_ADMIN = (
-    "✅ Рад знакомству! Ты найден в базе выпускников:\n"
-    "ФИО: {fio}\n"
-    "Год: {year}\n"
-    "Класс: {klass}\n"
-    "{teacher_block}"
-    "Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: https://t.me/test_bots_nf\n\n"
-    "Админ чата Сергей Федоров, 1983-2, @{admin_id}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся мне их задавать!"
-)
 INCOMPLETE_DATA_MESSAGE = (
     "Неполные данные!\n\n"
     "Ты можешь отправить данные в любом из форматов:\n\n"
@@ -334,10 +309,10 @@ INCOMPLETE_DATA_MESSAGE = (
     "3️⃣ Или отправь /start для пошагового ввода"
 )
 
-def make_success_message(fio, year, klass, teacher=None, admin_mention=None):
+def make_success_message(fio, year, klass, teacher=None, admin_username=None):
     teacher_block = f"Классный руководитель: {teacher}\n\n" if teacher and teacher != '-' else ""
-    if admin_mention is None:
-        admin_mention = "Админ Сергей"
+    if admin_username is None:
+        admin_username = "admin"
     return (
         "✅ Рад знакомству! Ты найден в базе выпускников:\n"
         f"ФИО: {fio}\n"
@@ -345,7 +320,12 @@ def make_success_message(fio, year, klass, teacher=None, admin_mention=None):
         f"Класс: {klass}\n"
         f"{teacher_block}"
         "Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: https://t.me/test_bots_nf\n\n"
-        f"Админ чата Сергей Федоров, 1983-2, {admin_mention}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся мне их задавать!"
+        f"Админ чата Сергей Федоров, 1983-2, {admin_username}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся мне их задавать!"
+    )
+
+def make_admin_error_message(admin_username):
+    return (
+        f"Произошла ошибка при одобрении заявки. Пожалуйста, попробуй позже или напиши администратору {admin_username}."
     )
 
 async def handle_private_message_entrypoint(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -376,7 +356,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
-                    await send_message(user_id, "Произошла ошибка при одобрении заявки. Пожалуйста, попробуй позже или напиши администратору @{admin_id}.", context)
+                    admin_username = await get_admin_username(context.bot)
+                    await send_message(user_id, make_admin_error_message(admin_username), context)
                 except Exception as e2:
                     logger.error(f"Error sending error message to user: {e2}")
             return
@@ -422,7 +403,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
-                    await send_message(user_id, "Произошла ошибка при одобрении заявки. Пожалуйста, попробуй позже или напиши администратору @{admin_id}.", context)
+                    admin_username = await get_admin_username(context.bot)
+                    await send_message(user_id, make_admin_error_message(admin_username), context)
                 except Exception as e2:
                     logger.error(f"Error sending error message to user: {e2}")
         else:
@@ -436,7 +418,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Error handling join request: {e}")
         try:
             user_id = update.chat_join_request.from_user.id
-            await send_message(user_id, "Произошла внутренняя ошибка при обработке заявки. Пожалуйста, попробуй позже или напиши администратору @{admin_id}.", context)
+            admin_username = await get_admin_username(context.bot)
+            await send_message(user_id, make_admin_error_message(admin_username), context)
         except Exception as e2:
             logger.error(f"Error sending error message to user: {e2}")
 
@@ -463,8 +446,8 @@ async def handle_private_message(user_id, text, telegram_app):
     if fio and year and klass:
         if check_user(fio, year, klass):
             verified_users.add(user_id)
-            admin_mention = await get_admin_mention(telegram_app.bot)
-            response = make_success_message(fio, year, klass, admin_mention=admin_mention)
+            admin_username = await get_admin_username(telegram_app.bot)
+            response = make_success_message(fio, year, klass, admin_username=admin_username)
             await send_message(user_id, response, telegram_app)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
@@ -510,8 +493,8 @@ async def handle_step_input(user_id, text, telegram_app):
             del user_states[user_id]
             if check_user(fio, year, klass):
                 verified_users.add(user_id)
-                admin_mention = await get_admin_mention(telegram_app.bot)
-                response = make_success_message(fio, year, klass, teacher, admin_mention)
+                admin_username = await get_admin_username(telegram_app.bot)
+                response = make_success_message(fio, year, klass, teacher, admin_username)
                 await send_message(user_id, response, telegram_app)
                 # Отправить админу уведомление о принятии
                 try:
