@@ -392,26 +392,24 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error(f"Error sending error message to user: {e2}")
 
 async def handle_private_message(user_id, text, telegram_app):
-    """Обрабатывает личные сообщения"""
+    # Если пользователь в процессе пошагового ввода — только handle_step_input!
+    if user_id in user_states:
+        await handle_step_input(user_id, text, telegram_app)
+        return
+
     # Команда /start или первое сообщение
     if text.strip().lower() == '/start':
         await start_step_input(user_id, telegram_app)
         return
-    
+
     # Если пользователь написал что-то кроме данных, показываем приветствие
     if not parse_text(text)[0]:  # Если не смогли распарсить данные
         welcome_message = create_instruction_message()
         await send_message(user_id, welcome_message, telegram_app)
         return
-    
-    # Пошаговый ввод
-    if user_id in user_states:
-        await handle_step_input(user_id, text, telegram_app)
-        return
-    
+
     # Парсинг данных
     fio, year, klass = parse_text(text)
-    
     if fio and year and klass:
         if check_user(fio, year, klass):
             verified_users.add(user_id)
@@ -440,16 +438,13 @@ async def handle_private_message(user_id, text, telegram_app):
         await send_message(user_id, response, telegram_app)
 
 async def handle_step_input(user_id, text, telegram_app):
-    """Обрабатывает пошаговый ввод данных"""
     try:
         state = user_states[user_id]
         step = state['step']
-        
         if text.strip().lower() == '/cancel':
             del user_states[user_id]
             await send_message(user_id, "Ввод данных отменен. Отправьте /start чтобы начать заново.", telegram_app)
             return
-        
         if step == 'waiting_name':
             name_parts = text.strip().split()
             if len(name_parts) >= 2:
@@ -458,7 +453,6 @@ async def handle_step_input(user_id, text, telegram_app):
                 response = "Отлично! Теперь введите год окончания школы (например: 2015):"
             else:
                 response = "Пожалуйста, введите имя и фамилию (например: Иван Петров):"
-                
         elif step == 'waiting_year':
             if text.strip().isdigit() and 1950 <= int(text.strip()) <= 2030:
                 state['data']['year'] = text.strip()
@@ -466,17 +460,14 @@ async def handle_step_input(user_id, text, telegram_app):
                 response = "Хорошо! Теперь введите номер класса (1-11):"
             else:
                 response = "Пожалуйста, введите корректный год (например: 2015):"
-                
         elif step == 'waiting_class':
             if text.strip().isdigit() and 1 <= int(text.strip()) <= 11:
                 state['data']['class'] = text.strip()
-                
                 fio = state['data']['fio']
                 year = state['data']['year']
                 klass = state['data']['class']
-                
+                # Только после успешного завершения всех шагов удаляем состояние
                 del user_states[user_id]
-                
                 if check_user(fio, year, klass):
                     verified_users.add(user_id)
                     response = (
@@ -493,9 +484,7 @@ async def handle_step_input(user_id, text, telegram_app):
                 return
             else:
                 response = "Пожалуйста, введите корректный номер класса (1-11):"
-        
         await send_message(user_id, response, telegram_app)
-        
     except Exception as e:
         logger.error(f"Error in step input: {e}")
         if user_id in user_states:
