@@ -275,17 +275,17 @@ async def get_admin_mention(bot):
     try:
         admin_id = Config.ADMIN_ID
         if not admin_id:
-            return "[админ](https://t.me/)"  # fallback
+            return "Админ Сергей"  # fallback
         admin_user = await bot.get_chat(admin_id)
         if getattr(admin_user, 'username', None):
-            return f"[@{admin_user.username}](https://t.me/{admin_user.username})"
+            return f"Админ Сергей @{admin_user.username}"
         else:
             # Если username нет, используем имя
-            name = admin_user.first_name or "админ"
-            return f"[{name}](tg://user?id={admin_id})"
+            name = admin_user.first_name or "Админ Сергей"
+            return f"{name} (tg://user?id={admin_id})"
     except Exception as e:
         logger.error(f"Не удалось получить ссылку на админа: {e}")
-        return "[админ](https://t.me/)"
+        return "Админ Сергей"
 
 async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     """Отправляет сообщение о том что пользователь не найден (без кнопки, с ником админа)"""
@@ -329,7 +329,7 @@ INCOMPLETE_DATA_MESSAGE = (
 def make_success_message(fio, year, klass, teacher=None, admin_mention=None):
     teacher_block = f"Классный руководитель: {teacher}\n\n" if teacher and teacher != '-' else ""
     if admin_mention is None:
-        admin_mention = "[админ](https://t.me/)"
+        admin_mention = "Админ Сергей"
     return (
         "✅ Рад знакомству! Ты найден в базе выпускников:\n"
         f"ФИО: {fio}\n"
@@ -613,3 +613,4 @@ if __name__ == "__main__":
         port=Config.PORT,
         webhook_url=webhook_url
     )
+
