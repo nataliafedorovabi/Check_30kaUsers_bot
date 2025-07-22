@@ -295,6 +295,10 @@ def create_instruction_message():
     """Создает стандартное сообщение с инструкциями"""
     return INSTRUCTION_MESSAGE
 
+# Глобальные переменные
+verified_users = set()  # Whitelist проверенных пользователей
+user_states = {}        # Состояния пошагового ввода
+
 # Обработчики
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает заявки на вступление в группу"""
