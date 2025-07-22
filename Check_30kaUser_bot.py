@@ -308,17 +308,19 @@ INCOMPLETE_DATA_MESSAGE = (
     "3️⃣ Или отправь /start для пошагового ввода"
 )
 
-def make_success_message(fio, year, klass, teacher=None, admin_username=None):
+def make_success_message(fio, year, klass, teacher=None, admin_username=None, group_link=None):
     teacher_block = f"Классный руководитель: {teacher}\n\n" if teacher and teacher != '-' else ""
     if admin_username is None:
         admin_username = "admin"
+    if group_link is None:
+        group_link = "https://t.me/"
     return (
         "✅ Рад знакомству! Ты найден(а) в базе выпускников:\n"
         f"ФИО: {fio}\n"
         f"Год: {year}\n"
         f"Класс: {klass}\n"
         f"{teacher_block}"
-        "Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: https://t.me/test_bots_nf\n\n"
+        f"Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: {group_link}\n\n"
         f"Админ чата Сергей Федоров, 1983-2, {admin_username}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся мне их задавать!"
     )
 
@@ -352,6 +354,9 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await context.bot.approve_chat_join_request(chat_id, user_id)
                 verified_users.discard(user_id)
                 logger.info(f"Approved request from verified user {user_id}")
+                # Приветствие в чат
+                welcome_message = "✨ Ура, нас стало больше! Добро пожаловать в клуб выпускников ФМЛ 30!"
+                await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
@@ -374,11 +379,6 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"❌ Could not send group message for {username}: {e}")
                 logger.info(f"⏳ Pending request from {username} (user_id: {user_id})")
-            # Удаляем/комментируем отправку сообщения в личку:
-            # try:
-            #     await send_message(user_id, "Заявка отклонена, так как не указано био. Пожалуйста, напиши боту в личные сообщения для подтверждения.", context)
-            # except Exception as e2:
-            #     logger.error(f"Error sending decline message to user: {e2}")
             return
         # Парсим данные из bio
         fio, year, klass = parse_text(bio)
@@ -399,6 +399,22 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             try:
                 await context.bot.approve_chat_join_request(chat_id, user_id)
                 logger.info(f"Approved request from {user_id} - user found in database")
+                # Получаем ссылку на чат
+                chat_info = await context.bot.get_chat(chat_id)
+                group_link = None
+                if getattr(chat_info, 'invite_link', None):
+                    group_link = chat_info.invite_link
+                elif getattr(chat_info, 'username', None):
+                    group_link = f"https://t.me/{chat_info.username}"
+                else:
+                    group_link = "https://t.me/"
+                admin_username = await get_admin_username(context.bot)
+                # Отправляем личное сообщение пользователю с правильной ссылкой
+                response = make_success_message(fio, year, klass, admin_username=admin_username, group_link=group_link)
+                await send_message(user_id, response, context)
+                # Приветствие в чат
+                welcome_message = "✨ Ура, нас стало больше! Добро пожаловать в клуб выпускников ФМЛ 30!"
+                await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
