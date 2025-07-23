@@ -264,6 +264,30 @@ INSTRUCTION_MESSAGE = (
     "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
 )
 
+async def send_admin_user_status(approved, fio, year, klass, username=None, group_link=None, teacher=None, telegram_app=None, first_name=None, last_name=None, user_id=None):
+    """Отправляет админу сообщение о принятии или отклонении пользователя (шаблон из handle_private_message)"""
+    if not Config.ADMIN_ID or not telegram_app:
+        return
+    username_display = username if username else '(нет username)'
+    extra_info = f"first_name, last_name: {first_name or ''}, {last_name or ''}\nuser_id: {user_id or ''}\n"
+    if approved:
+        admin_msg = (
+            f"✅ В чат {group_link or ''} принят новый пользователь {username_display}:\n"
+            f"ФИО: {fio}\n"
+            f"Год выпуска: {year}\n"
+            f"Класс: {klass}\n"
+            f"{extra_info}"
+        )
+    else:
+        admin_msg = (
+            f"❌ В чат {group_link or ''} постучался пользователь {username_display}, но не был найден в базе и был отклонен::\n"
+            f"ФИО: {fio}\n"
+            f"Год выпуска: {year}\n"
+            f"Класс: {klass}\n"
+            f"{extra_info}"
+        )
+    await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+
 async def get_admin_username(bot):
     try:
         admin_id = Config.ADMIN_ID
@@ -471,26 +495,34 @@ async def handle_private_message(user_id, text, telegram_app):
             admin_username = await get_admin_username(telegram_app.bot)
             response = make_success_message(fio, year, klass, admin_username=admin_username)
             await send_message(user_id, response, telegram_app)
-            # --- Новое: уведомление админу ---
-            if Config.ADMIN_ID:
-                admin_msg = (
-                    f"✅ В чат {group_link} принят новый пользователь {username}:\n"
-                    f"ФИО: {fio}\n"
-                    f"Год выпуска: {year}\n"
-                    f"Класс: {klass}\n"
-                )
-                await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+            # --- Уведомление админу через send_admin_user_status ---
+            username = None
+            first_name = None
+            last_name = None
+            try:
+                user = await telegram_app.bot.get_chat(user_id)
+                username = user.username
+                first_name = user.first_name
+                last_name = user.last_name
+            except Exception:
+                pass
+            group_link = os.environ.get("GROUP_LINK")
+            await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
-            # --- Новое: уведомление админу об отказе ---
-            if Config.ADMIN_ID:
-                admin_msg = (
-                    f"❌ В чат {group_link} постучался пользователь {username}, но не был найден в базе и был отклонен::\n"
-                    f"ФИО: {fio}\n"
-                    f"Год выпуска: {year}\n"
-                    f"Класс: {klass}\n"
-                )
-                await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+            # --- Уведомление админу об отказе через send_admin_user_status ---
+            username = None
+            first_name = None
+            last_name = None
+            try:
+                user = await telegram_app.bot.get_chat(user_id)
+                username = user.username
+                first_name = user.first_name
+                last_name = user.last_name
+            except Exception:
+                pass
+            group_link = os.environ.get("GROUP_LINK")
+            await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
     else:
         await send_message(user_id, INCOMPLETE_DATA_MESSAGE, telegram_app)
 
@@ -536,28 +568,34 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
                 admin_username = await get_admin_username(telegram_app.bot)
                 response = make_success_message(fio, year, klass, teacher, admin_username)
                 await send_message(user_id, response, telegram_app)
-                # --- Новое: уведомление админу ---
-                if Config.ADMIN_ID:
-                    admin_msg = (
-                        f"✅ Новый пользователь одобрен:\n"
-                        f"ФИО: {fio}\n"
-                        f"Год выпуска: {year}\n"
-                        f"Класс: {klass}\n"
-                        f"Кл.руководитель: {teacher}"
-                    )
-                    await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+                # username, first_name, last_name, user_id для админа
+                username = None
+                first_name = None
+                last_name = None
+                # Попробуем получить user из telegram_app, если возможно
+                try:
+                    user = await telegram_app.bot.get_chat(user_id)
+                    username = user.username
+                    first_name = user.first_name
+                    last_name = user.last_name
+                except Exception:
+                    pass
+                group_link = os.environ.get("GROUP_LINK")
+                await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, teacher=teacher, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
             else:
                 await send_not_found_message(user_id, fio, year, klass, telegram_app)
-                # --- Новое: уведомление админу об отказе ---
-                if Config.ADMIN_ID:
-                    admin_msg = (
-                        f"❌ Пользователь не найден в базе:\n"
-                        f"ФИО: {fio}\n"
-                        f"Год выпуска: {year}\n"
-                        f"Класс: {klass}\n"
-                        f"Кл.руководитель: {teacher}"
-                    )
-                    await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+                username = None
+                first_name = None
+                last_name = None
+                try:
+                    user = await telegram_app.bot.get_chat(user_id)
+                    username = user.username
+                    first_name = user.first_name
+                    last_name = user.last_name
+                except Exception:
+                    pass
+                group_link = os.environ.get("GROUP_LINK")
+                await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, teacher=teacher, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
             return
         await send_message(user_id, response, telegram_app)
     except Exception as e:
