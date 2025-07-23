@@ -348,6 +348,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         bio = getattr(update.chat_join_request, 'bio', None)
         logger.info(f"Processing join request from user {user_id} in chat {chat_id}")
         logger.info(f"Bio present: {bio is not None}")
+        user_info = update.chat_join_request.from_user
+        username = f"@{user_info.username}" if user_info.username else user_info.first_name
         # Проверяем whitelist
         if user_id in verified_users:
             logger.info(f"User {user_id} is verified, approving")
@@ -355,8 +357,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await context.bot.approve_chat_join_request(chat_id, user_id)
                 verified_users.discard(user_id)
                 logger.info(f"Approved request from verified user {user_id}")
-                # Приветствие в чат
-                welcome_message = "✨ Нас стало больше! {username}, добро пожаловать в клуб выпускников ФМЛ 30!"
+                # Приветствие в чат с подстановкой username
+                welcome_message = f"✨ Нас стало больше! {username}, добро пожаловать в клуб выпускников ФМЛ 30!"
                 await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
@@ -370,8 +372,6 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio")
             logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
-            user_info = update.chat_join_request.from_user
-            username = f"@{user_info.username}" if user_info.username else user_info.first_name
             try:
                 bot_info = await context.bot.get_me()
                 group_message = f"Привет {username}, рады видеть! Для вступления в чат выпускников ФМЛ 30, перейди в личку @{bot_info.username} и нажми start. Бот сверится с БД лицея."
@@ -403,18 +403,18 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 # Получаем ссылку на чат
                 chat_info = await context.bot.get_chat(chat_id)
                 group_link = None
-                if getattr(chat_info, 'invite_link', None):
-                    group_link = chat_info.invite_link
-                elif getattr(chat_info, 'username', None):
+                if getattr(chat_info, 'username', None):
                     group_link = f"https://t.me/{chat_info.username}"
+                elif getattr(chat_info, 'invite_link', None):
+                    group_link = chat_info.invite_link
                 else:
                     group_link = "https://t.me/"
                 admin_username = await get_admin_username(context.bot)
                 # Отправляем личное сообщение пользователю с правильной ссылкой
                 response = make_success_message(fio, year, klass, admin_username=admin_username, group_link=group_link)
                 await send_message(user_id, response, context)
-                # Приветствие в чат
-                welcome_message = "✨ Ура, нас стало больше! Добро пожаловать в клуб выпускников ФМЛ 30!"
+                # Приветствие в чат с подстановкой username
+                welcome_message = f"✨ Нас стало больше! {username}, добро пожаловать в клуб выпускников ФМЛ 30!"
                 await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
