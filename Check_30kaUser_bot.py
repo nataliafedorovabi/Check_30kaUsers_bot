@@ -268,7 +268,7 @@ async def send_admin_user_status(approved, fio, year, klass, username=None, grou
     """Отправляет админу сообщение о принятии или отклонении пользователя (шаблон из handle_private_message)"""
     if not Config.ADMIN_ID or not telegram_app:
         return
-    username_display = username if username else '(нет username)'
+    username_display = f"@{username}" if username else '(нет username)'
     extra_info = f"first_name, last_name: {first_name or ''}, {last_name or ''}\nuser_id: {user_id or ''}\n"
     if approved:
         admin_msg = (
@@ -383,7 +383,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 verified_users.discard(user_id)
                 logger.info(f"Approved request from verified user {user_id}")
                 # Приветствие в чат с подстановкой username
-                welcome_message = f"✨ Нас стало больше! {username}, добро пожаловать в клуб выпускников ФМЛ 30!"
+                welcome_message = f"✨ Нас стало больше! {username}, добро пожаловать в Клуб выпускников 30ки!"
                 await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
