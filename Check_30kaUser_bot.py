@@ -473,7 +473,7 @@ async def handle_private_message(user_id, text, telegram_app):
             # --- Новое: уведомление админу ---
             if Config.ADMIN_ID:
                 admin_msg = (
-                    f"✅ Новый пользователь одобрен:\n"
+                    f"✅ В чат {group_link} принят новый пользователь {username}:\n"
                     f"ФИО: {fio}\n"
                     f"Год выпуска: {year}\n"
                     f"Класс: {klass}\n"
@@ -484,7 +484,7 @@ async def handle_private_message(user_id, text, telegram_app):
             # --- Новое: уведомление админу об отказе ---
             if Config.ADMIN_ID:
                 admin_msg = (
-                    f"❌ Пользователь не найден в базе:\n"
+                    f"❌ В чат {group_link} постучался пользователь {username}, но не был найден в базе и был отклонен::\n"
                     f"ФИО: {fio}\n"
                     f"Год выпуска: {year}\n"
                     f"Класс: {klass}\n"
