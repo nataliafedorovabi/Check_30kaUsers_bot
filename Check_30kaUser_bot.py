@@ -398,7 +398,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
             try:
                 bot_info = await context.bot.get_me()
-                group_message = f"Привет {username}, рады видеть! Для вступления в чат выпускников ФМЛ 30, перейди в личку @{bot_info.username} и нажми start. Бот сверится с БД лицея."
+                group_message = f"Привет {username}, рады видеть! Для доступа в чат выпускников 30ки просьба ответить на несколько вопросов.  Перейди в личку @{bot_info.username} и нажми start."
                 await context.bot.send_message(chat_id=chat_id, text=group_message)
                 logger.info(f"✅ Sent instruction message to group for {username}")
             except Exception as e:
