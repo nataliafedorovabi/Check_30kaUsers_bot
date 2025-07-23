@@ -284,8 +284,12 @@ async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     message = (
         "К сожалению, мы не нашли тебя в базе данных, этот чат только для выпускников лицея.\n\n"
         f"Админ чата Сергей Федоров {admin_username} с удовольствием расскажет тебе все, секретов нет, но у нас правила. Надеюсь на понимание. С уважением.\n\n"
+        "Проверь правильность введенных данных:
+        f"ФИО: {fio}\n"
+        f"Год: {year}\n"
+        f"Класс: {klass}\n"
+        "Для повторного ввода нажми /start\n\n"
         f"Если ты точно выпускник(ца) ФМЛ 30, напиши Сергею в личку {admin_username} — мы обязательно разберёмся!\n"
-        "Или попробуй еще раз /start"
     )
     await send_message(user_id, message, context_or_app)
 
@@ -315,12 +319,9 @@ def make_success_message(fio, year, klass, teacher=None, admin_username=None, gr
     if group_link is None:
         group_link = "https://t.me/"
     return (
-        "✅ Рад знакомству! Ты найден(а) в базе выпускников:\n"
-        f"ФИО: {fio}\n"
-        f"Год: {year}\n"
-        f"Класс: {klass}\n"
-        f"{teacher_block}"
+        "✅ Рады знакомству! Ты найден(а) в базе выпускников\n"
         f"Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: {group_link}\n\n"
+        f"Рекомендуем опубликовать в чате инфо о себе (год выпуска, чем занимаешься и т.п.) с тегом #ктоя\n\n"
         f"Админ чата Сергей Федоров, 1983-2, {admin_username}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся мне их задавать!"
     )
 
@@ -355,7 +356,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 verified_users.discard(user_id)
                 logger.info(f"Approved request from verified user {user_id}")
                 # Приветствие в чат
-                welcome_message = "✨ Ура, нас стало больше! Добро пожаловать в клуб выпускников ФМЛ 30!"
+                welcome_message = "✨ Нас стало больше! {username}, добро пожаловать в клуб выпускников ФМЛ 30!"
                 await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
