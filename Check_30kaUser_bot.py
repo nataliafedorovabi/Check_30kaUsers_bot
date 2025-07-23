@@ -50,7 +50,7 @@ class Config:
     DB_TABLE = get_env_var("DB_TABLE", "cms_users")
     WEBHOOK_URL = get_env_var("WEBHOOK_URL")
     PORT = get_env_var("PORT", 10000, int)
-    ADMIN_ID = get.env_var("ADMIN_ID", 0, int)
+    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
 
 # Проверяем наличие обязательных переменных
 required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
