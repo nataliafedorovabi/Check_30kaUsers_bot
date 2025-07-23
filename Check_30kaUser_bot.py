@@ -50,7 +50,7 @@ class Config:
     DB_TABLE = get_env_var("DB_TABLE", "cms_users")
     WEBHOOK_URL = get_env_var("WEBHOOK_URL")
     PORT = get_env_var("PORT", 10000, int)
-    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
+    ADMIN_ID = get.env_var("ADMIN_ID", 0, int)
 
 # Проверяем наличие обязательных переменных
 required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
@@ -316,8 +316,9 @@ def make_success_message(fio, year, klass, teacher=None, admin_username=None, gr
     teacher_block = f"Классный руководитель: {teacher}\n\n" if teacher and teacher != '-' else ""
     if admin_username is None:
         admin_username = "admin"
+    # --- Изменено: если group_link не передан, берем из окружения GROUP_LINK, иначе дефолт ---
     if group_link is None:
-        group_link = "https://t.me/"
+        group_link = os.environ.get("GROUP_LINK") or ""
     return (
         "✅ Рады знакомству! Ты найден(а) в базе выпускников\n"
         f"Теперь подай заявку на вступление в чат - она будет одобрена автоматически, ссылка: {group_link}\n\n"
