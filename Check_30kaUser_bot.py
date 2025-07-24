@@ -552,7 +552,7 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
             if text.strip().isdigit() and 1 <= int(text.strip()) <= 11:
                 state['data']['class'] = text.strip()
                 state['step'] = 'waiting_teacher'
-                response = "Если помнишь, напиши ФИ классного руководителя (или просто '-' если не помнишь):"
+                response = "Напиши Фамилию и/или Имя Отчество классного руководителя:"
             else:
                 response = "Пожалуйста, введи корректный номер класса (1-11):"
         elif step == 'waiting_teacher':
