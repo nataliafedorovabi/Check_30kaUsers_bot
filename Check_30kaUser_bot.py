@@ -237,10 +237,9 @@ def check_user(fio, year, klass):
     return False
 
 # Telegram утилиты
-async def send_message(user_id, text, context_or_app, reply_markup=None):
+async def send_message(user_id, text, context_or_app, reply_markup=None, parse_mode=None):
     """Универсальная отправка сообщений"""
     try:
-        # Определяем тип объекта и получаем bot
         bot = None
         if hasattr(context_or_app, 'bot'):
             bot = context_or_app.bot
@@ -253,7 +252,8 @@ async def send_message(user_id, text, context_or_app, reply_markup=None):
         await bot.send_message(
             chat_id=user_id, 
             text=text,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
         )
         logger.info(f"Sent message to user {user_id}")
     except Exception as e:
@@ -306,15 +306,15 @@ async def send_not_found_message(user_id, fio, year, klass, context_or_app):
     """Отправляет сообщение о том что пользователь не найден (без кнопки, с ником админа)"""
     admin_username = await get_admin_username(context_or_app.bot if hasattr(context_or_app, 'bot') else context_or_app)
     message = (
-        "К сожалению, мы не нашли тебя в базе данных \033[1mи не можем принять в чат\033[0m, этот чат только для выпускников лицея.\n\n"
+        "К сожалению, мы не нашли тебя в базе данных <b>и не можем принять в чат</b>, этот чат только для выпускников лицея.\n\n"
         "Проверь правильность введенных данных:\n"
         f"ФИО: {fio}\n"
         f"Год: {year}\n"
         f"Класс: {klass}\n"
-        "Для \033[1mисправления данных снова\033[0m нажми /start\n\n"
-        f"Если \033[1mданные верные и\033[0m ты точно выпускник(ца) \033[1m30ки\033[0m, напиши \033[1mадмину чата\033[0m Сергею в личку {admin_username} — мы обязательно разберёмся!\n"
+        "Для <b>исправления данных снова</b> нажми /start\n\n"
+        f"Если <b>данные верные и</b> ты точно выпускник(ца) <b>30ки</b>, напиши <b>админу чата</b> Сергею в личку {admin_username} — мы обязательно разберёмся!\n"
     )
-    await send_message(user_id, message, context_or_app)
+    await send_message(user_id, message, context_or_app, parse_mode="HTML")
 
 def create_instruction_message():
     """Создает стандартное сообщение с инструкциями"""
