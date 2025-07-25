@@ -283,6 +283,7 @@ async def send_admin_user_status(approved, fio, year, klass, username=None, grou
             f"ФИО: {fio}\n"
             f"Год выпуска: {year}\n"
             f"Класс: {klass}\n"
+            f"Кл.рук.: {teacher}\n"
             f"{extra_info}"
         )
     else:
@@ -291,6 +292,7 @@ async def send_admin_user_status(approved, fio, year, klass, username=None, grou
             f"ФИО: {fio}\n"
             f"Год выпуска: {year}\n"
             f"Класс: {klass}\n"
+            f"Кл.рук.: {teacher}\n"
             f"{extra_info}"
         )
     for admin_id in admin_ids:
@@ -435,6 +437,26 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             try:
                 await context.bot.approve_chat_join_request(chat_id, user_id)
                 logger.info(f"Approved request from {user_id} - user found in database")
+                # --- Обновляем поле in_chat в базе ---
+                try:
+                    from datetime import datetime
+                    today = datetime.utcnow().date()
+                    # Получаем username или user_id
+                    tg_username_val = user_info.username if user_info.username else str(user_id)
+                    with get_db_connection() as conn:
+                        with conn.cursor() as cursor:
+                            update_query = f"""
+                                UPDATE {Config.DB_TABLE}
+                                SET in_chat = %s, tg_username = %s
+                                WHERE year = %s AND klass = %s AND (
+                                    lower(replace(fio, 'ё', 'е')) = lower(replace(%s, 'ё', 'е'))
+                                    OR lower(replace(fio, 'е', 'ё')) = lower(replace(%s, 'е', 'ё'))
+                                )
+                            """
+                            cursor.execute(update_query, (str(today), tg_username_val, format_for_db(year, "year"), format_for_db(klass, "class"), fio, fio))
+                            logger.info(f"Updated in_chat and tg_username for user: {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                except Exception as e:
+                    logger.error(f"Error updating in_chat/tg_username in DB: {e}")
                 # Получаем ссылку на чат
                 chat_info = await context.bot.get_chat(chat_id)
                 group_link = None
