@@ -110,11 +110,12 @@ def get_db_connection():
 
 # Утилиты для работы с данными
 def normalize_fio(raw_fio):
-    """Нормализует ФИО для гибкого сравнения"""
+    """Нормализует ФИО для гибкого сравнения, заменяя ё на е"""
     if not raw_fio:
         return set()
-    
-    parts = [part.strip().lower() for part in raw_fio.strip().split() if part.strip()]
+    def norm(s):
+        return s.strip().lower().replace('ё', 'е')
+    parts = [norm(part) for part in raw_fio.strip().split() if part.strip()]
     # Берем максимум 2 части (убираем отчество)
     return set(parts[:2])
 
@@ -264,9 +265,15 @@ INSTRUCTION_MESSAGE = (
     "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
 )
 
-async def send_admin_user_status(approved, fio, year, klass, username=None, group_link=None, teacher=None, telegram_app=None, first_name=None, last_name=None, user_id=None):
-    """Отправляет админу сообщение о принятии или отклонении пользователя (шаблон из handle_private_message)"""
-    if not Config.ADMIN_ID or not telegram_app:
+async def send_admin_user_status(approved, fio, year, klass, username=None, group_link=None, teacher=None, telegram_app=None, first_name=None, last_name=None, user_id=None, chat_id=None):
+    """Отправляет всем админам группы сообщение о принятии или отклонении пользователя"""
+    if not telegram_app or not chat_id:
+        return
+    try:
+        admins = await telegram_app.bot.get_chat_administrators(chat_id)
+        admin_ids = [admin.user.id for admin in admins if not admin.user.is_bot]
+    except Exception as e:
+        logger.error(f"Не удалось получить список админов: {e}")
         return
     username_display = f"@{username}" if username else '(нет username)'
     extra_info = f"first_name, last_name: {first_name or ''}, {last_name or ''}\nuser_id: {user_id or ''}\n"
@@ -286,7 +293,11 @@ async def send_admin_user_status(approved, fio, year, klass, username=None, grou
             f"Класс: {klass}\n"
             f"{extra_info}"
         )
-    await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+    for admin_id in admin_ids:
+        try:
+            await send_message(admin_id, admin_msg, telegram_app)
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление админу {admin_id}: {e}")
 
 async def get_admin_username(bot):
     try:
@@ -506,7 +517,7 @@ async def handle_private_message(user_id, text, telegram_app):
             except Exception:
                 pass
             group_link = os.environ.get("GROUP_LINK")
-            await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
+            await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=update.effective_chat.id)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
             # --- Уведомление админу об отказе через send_admin_user_status ---
@@ -521,7 +532,7 @@ async def handle_private_message(user_id, text, telegram_app):
             except Exception:
                 pass
             group_link = os.environ.get("GROUP_LINK")
-            await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
+            await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=update.effective_chat.id)
     else:
         await send_message(user_id, INCOMPLETE_DATA_MESSAGE, telegram_app)
 
@@ -580,7 +591,7 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
                 except Exception:
                     pass
                 group_link = os.environ.get("GROUP_LINK")
-                await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, teacher=teacher, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
+                await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, teacher=teacher, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=chat_id)
             else:
                 await send_not_found_message(user_id, fio, year, klass, telegram_app)
                 username = None
@@ -594,7 +605,7 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
                 except Exception:
                     pass
                 group_link = os.environ.get("GROUP_LINK")
-                await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, teacher=teacher, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id)
+                await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, teacher=teacher, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=chat_id)
             return
         await send_message(user_id, response, telegram_app)
     except Exception as e:
