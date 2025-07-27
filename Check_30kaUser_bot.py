@@ -24,6 +24,35 @@ logger = logging.getLogger(__name__)
 # Отключаем warning'и Werkzeug в production
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
+# === СПИСОК ЗАПРЕЩЕННЫХ СЛОВ ===
+FORBIDDEN_WORDS = {
+    'penis', 'dick', 'cock', 'pussy', 'vagina', 'fuck', 'shit', 'bitch', 'whore', 'slut',
+    'хуй', 'пизда', 'блять', 'ебать', 'сука', 'блядь', 'хуя', 'пиздец', 'еблан', 'ебало',
+    'faggot', 'nigger', 'nigga', 'kike', 'spic', 'chink', 'gook', 'wop', 'kraut',
+    'пидор', 'пидорас', 'гомик', 'лесбиянка', 'педик', 'гей', 'лесби', 'транс',
+    'asshole', 'cunt', 'twat', 'bastard', 'motherfucker', 'fucker', 'dumbass',
+    'мудак', 'мудила', 'говнюк', 'говно', 'дерьмо', 'говнюк', 'мудак', 'идиот',
+    'retard', 'idiot', 'moron', 'stupid', 'dumb', 'retarded',
+    'дебил', 'идиот', 'тупой', 'дурак', 'придурок', 'кретин', 'дегенерат'
+}
+
+def contains_forbidden_words(text):
+    """
+    Проверяет текст на наличие запрещенных слов
+    Возвращает список найденных запрещенных слов или None если ничего не найдено
+    """
+    if not text:
+        return None
+    
+    text_lower = text.lower().strip()
+    found_words = []
+    
+    for word in FORBIDDEN_WORDS:
+        if word in text_lower:
+            found_words.append(word)
+    
+    return found_words if found_words else None
+
 # Вспомогательная функция для безопасного получения переменных окружения
 def get_env_var(var_name, default=None, var_type=str):
     """Безопасно получает переменную окружения с обработкой пустых строк"""
@@ -36,6 +65,37 @@ def get_env_var(var_name, default=None, var_type=str):
     except (ValueError, TypeError) as e:
         logger.warning(f"Invalid value for {var_name}: {value}. Using default: {default}")
         return var_type(default) if default is not None else None
+
+def check_user_names(first_name=None, last_name=None, username=None):
+    """
+    Проверяет имя, фамилию и никнейм пользователя на запрещенные слова
+    Возвращает кортеж (is_valid, forbidden_words_found, message)
+    """
+    all_names = []
+    if first_name:
+        all_names.append(('имя', first_name))
+    if last_name:
+        all_names.append(('фамилия', last_name))
+    if username:
+        all_names.append(('никнейм', username))
+    
+    found_forbidden = []
+    
+    for name_type, name_value in all_names:
+        forbidden = contains_forbidden_words(name_value)
+        if forbidden:
+            found_forbidden.extend([f"{name_type}: {word}" for word in forbidden])
+    
+    if found_forbidden:
+        message = (
+            "❌ Заявка отклонена!\n\n"
+            "В вашем имени, фамилии или никнейме обнаружены некорректные слова:\n"
+            f"{', '.join(found_forbidden)}\n\n"
+            "Пожалуйста, измените свои данные в настройках Telegram и попробуйте снова."
+        )
+        return False, found_forbidden, message
+    
+    return True, [], None
 
 # Конфигурация из окружения
 class Config:
@@ -266,17 +326,13 @@ INSTRUCTION_MESSAGE = (
 )
 
 async def send_admin_user_status(approved, fio, year, klass, username=None, group_link=None, teacher=None, telegram_app=None, first_name=None, last_name=None, user_id=None, chat_id=None):
-    """Отправляет всем админам группы сообщение о принятии или отклонении пользователя"""
-    if not telegram_app or not chat_id:
+    """Отправляет только главному админу (ADMIN_ID) сообщение о принятии или отклонении пользователя"""
+    if not telegram_app or not Config.ADMIN_ID:
         return
-    try:
-        admins = await telegram_app.bot.get_chat_administrators(chat_id)
-        admin_ids = [admin.user.id for admin in admins if not admin.user.is_bot]
-    except Exception as e:
-        logger.error(f"Не удалось получить список админов: {e}")
-        return
+    
     username_display = f"@{username}" if username else '(нет username)'
     extra_info = f"first_name, last_name: {first_name or ''}, {last_name or ''}\nuser_id: {user_id or ''}\n"
+    
     if approved:
         admin_msg = (
             f"✅ В чат {group_link or ''} принят новый пользователь {username_display}:\n"
@@ -288,18 +344,19 @@ async def send_admin_user_status(approved, fio, year, klass, username=None, grou
         )
     else:
         admin_msg = (
-            f"❌ В чат {group_link or ''} постучался пользователь {username_display}, но не был найден в базе и был отклонен::\n"
+            f"❌ В чат {group_link or ''} постучался пользователь {username_display}, но не был найден в базе и был отклонен:\n"
             f"ФИО: {fio}\n"
             f"Год выпуска: {year}\n"
             f"Класс: {klass}\n"
             f"Кл.рук.: {teacher}\n"
             f"{extra_info}"
         )
-    for admin_id in admin_ids:
-        try:
-            await send_message(admin_id, admin_msg, telegram_app)
-        except Exception as e:
-            logger.error(f"Не удалось отправить уведомление админу {admin_id}: {e}")
+    
+    try:
+        await send_message(Config.ADMIN_ID, admin_msg, telegram_app)
+        logger.info(f"Sent user status notification to admin {Config.ADMIN_ID}")
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление админу {Config.ADMIN_ID}: {e}")
 
 async def get_admin_username(bot):
     try:
@@ -387,6 +444,39 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info(f"Bio present: {bio is not None}")
         user_info = update.chat_join_request.from_user
         username = f"@{user_info.username}" if user_info.username else user_info.first_name
+        
+        # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+        is_valid_names, forbidden_words, forbidden_message = check_user_names(
+            first_name=user_info.first_name,
+            last_name=user_info.last_name,
+            username=user_info.username
+        )
+        
+        if not is_valid_names:
+            logger.info(f"Declining request from {user_id}: forbidden words found - {forbidden_words}")
+            try:
+                await context.bot.decline_chat_join_request(chat_id, user_id)
+                await send_message(user_id, forbidden_message, context)
+            except Exception as e:
+                logger.error(f"Error declining join request due to forbidden words: {e}")
+            return
+        
+        # === УВЕДОМЛЕНИЕ АДМИНУ О НОВОЙ ЗАЯВКЕ ===
+        if Config.ADMIN_ID:
+            try:
+                admin_notification = (
+                    f"🆕 НОВАЯ ЗАЯВКА НА ВСТУПЛЕНИЕ В ЧАТ\n\n"
+                    f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
+                    f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
+                    f"🆔 ID: {user_id}\n"
+                    f"📝 Bio: {bio if bio else '(нет bio)'}\n\n"
+                    f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
+                )
+                await send_message(Config.ADMIN_ID, admin_notification, context)
+                logger.info(f"Sent join request notification to admin {Config.ADMIN_ID}")
+            except Exception as e:
+                logger.error(f"Error sending join request notification to admin: {e}")
+        
         # Проверяем whitelist
         if user_id in verified_users:
             logger.info(f"User {user_id} is verified, approving")
@@ -394,9 +484,6 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await context.bot.approve_chat_join_request(chat_id, user_id)
                 verified_users.discard(user_id)
                 logger.info(f"Approved request from verified user {user_id}")
-                # Приветствие в чат с подстановкой username
-                welcome_message = f"✨ Нас стало больше! {username}, добро пожаловать в Клуб выпускников 30ки!"
-                await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
@@ -409,14 +496,6 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio")
             logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
-            try:
-                bot_info = await context.bot.get_me()
-                group_message = f"Привет {username}, рады видеть! Для доступа в чат выпускников 30ки просьба ответить на несколько вопросов.  Перейди в личку @{bot_info.username} и нажми start (может быть задержка ответа 1-2 минуты)."
-                await context.bot.send_message(chat_id=chat_id, text=group_message)
-                logger.info(f"✅ Sent instruction message to group for {username}")
-            except Exception as e:
-                logger.error(f"❌ Could not send group message for {username}: {e}")
-                logger.info(f"⏳ Pending request from {username} (user_id: {user_id})")
             return
         # Парсим данные из bio
         fio, year, klass = parse_text(bio)
@@ -470,9 +549,6 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 # Отправляем личное сообщение пользователю с правильной ссылкой
                 response = make_success_message(fio, year, klass, admin_username=admin_username, group_link=group_link)
                 await send_message(user_id, response, context)
-                # Приветствие в чат с подстановкой username
-                welcome_message = f"✨ Нас стало больше! {username}, добро пожаловать в клуб выпускников ФМЛ 30!"
-                await context.bot.send_message(chat_id=chat_id, text=welcome_message)
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
                 try:
@@ -501,6 +577,23 @@ async def handle_private_message(user_id, text, telegram_app):
     if int(user_id) == int(Config.ADMIN_ID) and text.strip().lower() == '/start':
         await send_message(user_id, "Привет, я проверяю заявки в чате выпускников 30ки. Сюда будут приходить одобренные и отклонённые заявки.", telegram_app)
         return
+    
+    # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+    try:
+        user_info = await telegram_app.bot.get_chat(user_id)
+        is_valid_names, forbidden_words, forbidden_message = check_user_names(
+            first_name=user_info.first_name,
+            last_name=user_info.last_name,
+            username=user_info.username
+        )
+        
+        if not is_valid_names:
+            logger.info(f"Rejecting private message from {user_id}: forbidden words found - {forbidden_words}")
+            await send_message(user_id, forbidden_message, telegram_app)
+            return
+    except Exception as e:
+        logger.error(f"Error checking user names for {user_id}: {e}")
+        # Если не удалось получить информацию о пользователе, продолжаем обработку
     # Если пользователь в процессе пошагового ввода — только handle_step_input!
     if user_id in user_states:
         await handle_step_input(user_id, text, telegram_app)
@@ -539,7 +632,7 @@ async def handle_private_message(user_id, text, telegram_app):
             except Exception:
                 pass
             group_link = os.environ.get("GROUP_LINK")
-            await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=update.effective_chat.id)
+            await send_admin_user_status(True, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=None)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
             # --- Уведомление админу об отказе через send_admin_user_status ---
@@ -554,12 +647,30 @@ async def handle_private_message(user_id, text, telegram_app):
             except Exception:
                 pass
             group_link = os.environ.get("GROUP_LINK")
-            await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=update.effective_chat.id)
+            await send_admin_user_status(False, fio, year, klass, username=username, group_link=group_link, telegram_app=telegram_app, first_name=first_name, last_name=last_name, user_id=user_id, chat_id=None)
     else:
         await send_message(user_id, INCOMPLETE_DATA_MESSAGE, telegram_app)
 
 async def handle_step_input(user_id, text, telegram_app, chat_id=None):
     try:
+        # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+        try:
+            user_info = await telegram_app.bot.get_chat(user_id)
+            is_valid_names, forbidden_words, forbidden_message = check_user_names(
+                first_name=user_info.first_name,
+                last_name=user_info.last_name,
+                username=user_info.username
+            )
+            
+            if not is_valid_names:
+                logger.info(f"Rejecting step input from {user_id}: forbidden words found - {forbidden_words}")
+                del user_states[user_id]  # Очищаем состояние
+                await send_message(user_id, forbidden_message, telegram_app)
+                return
+        except Exception as e:
+            logger.error(f"Error checking user names for {user_id}: {e}")
+            # Если не удалось получить информацию о пользователе, продолжаем обработку
+        
         state = user_states[user_id]
         step = state['step']
         if text.strip().lower() == '/cancel':
@@ -637,6 +748,23 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
 
 async def start_step_input(user_id, telegram_app):
     """Начинает пошаговый ввод данных"""
+    # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+    try:
+        user_info = await telegram_app.bot.get_chat(user_id)
+        is_valid_names, forbidden_words, forbidden_message = check_user_names(
+            first_name=user_info.first_name,
+            last_name=user_info.last_name,
+            username=user_info.username
+        )
+        
+        if not is_valid_names:
+            logger.info(f"Rejecting step input start from {user_id}: forbidden words found - {forbidden_words}")
+            await send_message(user_id, forbidden_message, telegram_app)
+            return
+    except Exception as e:
+        logger.error(f"Error checking user names for {user_id}: {e}")
+        # Если не удалось получить информацию о пользователе, продолжаем обработку
+    
     user_states[user_id] = {'step': 'waiting_name', 'data': {}}
     response = (
         "👋 Привет! Спасибо за заявку в чате выпускников 30ки.\n\n"
