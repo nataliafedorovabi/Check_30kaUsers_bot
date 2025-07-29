@@ -466,7 +466,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 admin_template_message = (
                     f"Привет {user_name}, рад видеть! От Вас пришла заявка на вступление в чат выпускников 30ки. "
                     f"Для доступа в чат просьба ответить на несколько вопросов. "
-                    f"Просьба перейти в бота @checkmember30_bot и нажать start (может быть задержка ответа 1-2 минуты)"
+                    f"Просьба перейти в бота @Member30check_bot и нажать start (может быть задержка ответа 1-2 минуты)"
                 )
                 await send_message(Config.ADMIN_ID, admin_template_message, context)
                 logger.info(f"Sent template message to admin {Config.ADMIN_ID}")
