@@ -430,14 +430,11 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             username=user_info.username
         )
         
+        # Формируем уведомление о запрещенных словах для админа
+        forbidden_words_info = ""
         if not is_valid_names:
-            logger.info(f"Declining request from {user_id}: forbidden words found - {forbidden_words}")
-            try:
-                await context.bot.decline_chat_join_request(chat_id, user_id)
-                await send_message(user_id, forbidden_message, context)
-            except Exception as e:
-                logger.error(f"Error declining join request due to forbidden words: {e}")
-            return
+            forbidden_words_info = f"\n⚠️ ВНИМАНИЕ: Обнаружены запрещенные слова в профиле пользователя: {', '.join(forbidden_words)}"
+            logger.info(f"Found forbidden words in user {user_id} profile: {forbidden_words}")
         
         # Уведомление админу о новой заявке
         admin_notification = (
@@ -445,7 +442,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
             f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
             f"🆔 ID: {user_id}\n"
-            f"📝 Bio: {bio if bio else '(нет bio)'}\n\n"
+            f"📝 Bio: {bio if bio else '(нет bio)'}{forbidden_words_info}\n\n"
             f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
         )
         await send_admin_notification(admin_notification, context)
