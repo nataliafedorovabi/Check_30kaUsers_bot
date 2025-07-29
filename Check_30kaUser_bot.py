@@ -1,11 +1,11 @@
+
 import os
-import asyncio
 import psycopg2
 import psycopg2.extras
 import logging
 from contextlib import contextmanager
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, ChatJoinRequestHandler, CallbackContext, MessageHandler, CommandHandler, CallbackQueryHandler, filters
+from telegram.ext import ApplicationBuilder, ContextTypes, ChatJoinRequestHandler, MessageHandler, CommandHandler, CallbackQueryHandler, filters
 
 # Загружаем переменные окружения из .env файла (для локальной разработки)
 try:
@@ -36,11 +36,25 @@ FORBIDDEN_WORDS = {
     'дебил', 'идиот', 'тупой', 'дурак', 'придурок', 'кретин', 'дегенерат'
 }
 
+# === КОНСТАНТЫ СООБЩЕНИЙ ===
+INSTRUCTION_MESSAGE = (
+    "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
+)
+
+INCOMPLETE_DATA_MESSAGE = (
+    "Неполные данные!\n\n"
+    "Ты можешь отправить данные в любом из форматов:\n\n"
+    "1️⃣ Одной строкой: Федоров Сергей 2010 2\n\n"
+    "2️⃣ С двоеточиями:\n"
+    "ФИО: Ваше Имя Фамилия\n"
+    "Год: 2015\n"
+    "Класс: 3\n\n"
+    "3️⃣ Или отправь /start для пошагового ввода"
+)
+
+# === УТИЛИТЫ ===
 def contains_forbidden_words(text):
-    """
-    Проверяет текст на наличие запрещенных слов
-    Возвращает список найденных запрещенных слов или None если ничего не найдено
-    """
+    """Проверяет текст на наличие запрещенных слов"""
     if not text:
         return None
     
@@ -53,7 +67,6 @@ def contains_forbidden_words(text):
     
     return found_words if found_words else None
 
-# Вспомогательная функция для безопасного получения переменных окружения
 def get_env_var(var_name, default=None, var_type=str):
     """Безопасно получает переменную окружения с обработкой пустых строк"""
     value = os.environ.get(var_name)
@@ -67,10 +80,7 @@ def get_env_var(var_name, default=None, var_type=str):
         return var_type(default) if default is not None else None
 
 def check_user_names(first_name=None, last_name=None, username=None):
-    """
-    Проверяет имя, фамилию и никнейм пользователя на запрещенные слова
-    Возвращает кортеж (is_valid, forbidden_words_found, message)
-    """
+    """Проверяет имя, фамилию и никнейм пользователя на запрещенные слова"""
     all_names = []
     if first_name:
         all_names.append(('имя', first_name))
@@ -97,78 +107,6 @@ def check_user_names(first_name=None, last_name=None, username=None):
     
     return True, [], None
 
-# Конфигурация из окружения
-class Config:
-    BOT_TOKEN = get_env_var("BOT_TOKEN")
-    # PostgreSQL конфигурация - поддерживаем как отдельные параметры, так и DATABASE_URL
-    DATABASE_URL = get_env_var("DATABASE_URL")  # Render предоставляет полный URL
-    DB_HOST = get_env_var("DB_HOST")
-    DB_PORT = get_env_var("DB_PORT", 5432, int)  # PostgreSQL порт по умолчанию
-    DB_NAME = get_env_var("DB_NAME")
-    DB_USER = get_env_var("DB_USER")
-    DB_PASSWORD = get_env_var("DB_PASSWORD")
-    DB_TABLE = get_env_var("DB_TABLE", "cms_users")
-    WEBHOOK_URL = get_env_var("WEBHOOK_URL")
-    PORT = get_env_var("PORT", 10000, int)
-    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
-
-# Проверяем наличие обязательных переменных
-required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
-if Config.DATABASE_URL:
-    logger.info("Using DATABASE_URL for database connection")
-else:
-    required_vars.extend(["DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"])
-    logger.info("Using individual database parameters")
-
-missing_vars = [var for var in required_vars if not getattr(Config, var)]
-if missing_vars:
-    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-# База данных
-@contextmanager
-def get_db_connection():
-    """Контекстный менеджер для подключения к PostgreSQL"""
-    conn = None
-    try:
-        if Config.DATABASE_URL:
-            logger.info(f"Connecting to PostgreSQL using DATABASE_URL")
-            conn = psycopg2.connect(
-                Config.DATABASE_URL,
-                cursor_factory=psycopg2.extras.RealDictCursor,
-                connect_timeout=10,
-                sslmode='require'  # Render требует SSL
-            )
-        else:
-            logger.info(f"Connecting to PostgreSQL: {Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}")
-            conn = psycopg2.connect(
-                host=Config.DB_HOST,
-                port=Config.DB_PORT,
-                user=Config.DB_USER,
-                password=Config.DB_PASSWORD,
-                database=Config.DB_NAME,
-                cursor_factory=psycopg2.extras.RealDictCursor,
-                connect_timeout=10,
-                sslmode='prefer'
-            )
-        
-        conn.autocommit = True  # Включаем автокоммит
-        logger.info("✅ PostgreSQL connection successful")
-        yield conn
-        
-    except Exception as e:
-        logger.error(f"❌ PostgreSQL connection error: {e}")
-        if Config.DATABASE_URL:
-            logger.error("Connection via DATABASE_URL failed")
-        else:
-            logger.error(f"Connection details - Host: {Config.DB_HOST}, Port: {Config.DB_PORT}, DB: {Config.DB_NAME}, User: {Config.DB_USER}")
-        raise
-    finally:
-        if conn:
-            conn.close()
-            logger.info("PostgreSQL connection closed")
-
-# Утилиты для работы с данными
 def normalize_fio(raw_fio):
     """Нормализует ФИО для гибкого сравнения, заменяя ё на е"""
     if not raw_fio:
@@ -183,7 +121,6 @@ def format_for_db(value, field_type="string"):
     """Форматирует значения для поиска в БД"""
     if field_type in ["year", "class"]:
         try:
-            # Возвращаем integer для PostgreSQL (без .00)
             return int(value)
         except ValueError:
             logger.warning(f"Invalid {field_type} format: {value}")
@@ -239,6 +176,92 @@ def parse_text(text):
     
     return None, None, None
 
+def make_success_message(fio, year, klass, teacher=None, admin_username=None, group_link=None):
+    """Создает сообщение об успешной проверке"""
+    if admin_username is None:
+        admin_username = "@SergeyBF"
+    return (
+        "✅ Рады знакомству! Скоро твою заявку одобрят.\n\n"
+        "Рекомендуем опубликовать в чате инфо о себе (год выпуска, чем занимаешься и т.п.) с тегом #ктоя\n\n"
+        f"Админ чата Сергей Федоров, 1983-2, {admin_username}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся их задавать!"
+    )
+
+def make_admin_error_message(admin_username):
+    """Создает сообщение об ошибке для пользователя"""
+    return (
+        f"Произошла ошибка при одобрении заявки. Пожалуйста, попробуй позже или напиши администратору {admin_username}."
+    )
+
+# === КОНФИГУРАЦИЯ ===
+class Config:
+    BOT_TOKEN = get_env_var("BOT_TOKEN")
+    DATABASE_URL = get_env_var("DATABASE_URL")
+    DB_HOST = get_env_var("DB_HOST")
+    DB_PORT = get_env_var("DB_PORT", 5432, int)
+    DB_NAME = get_env_var("DB_NAME")
+    DB_USER = get_env_var("DB_USER")
+    DB_PASSWORD = get_env_var("DB_PASSWORD")
+    DB_TABLE = get_env_var("DB_TABLE", "cms_users")
+    WEBHOOK_URL = get_env_var("WEBHOOK_URL")
+    PORT = get_env_var("PORT", 10000, int)
+    ADMIN_ID = get_env_var("ADMIN_ID", 0, int)
+
+# Проверяем наличие обязательных переменных
+required_vars = ["BOT_TOKEN", "WEBHOOK_URL"]
+if Config.DATABASE_URL:
+    logger.info("Using DATABASE_URL for database connection")
+else:
+    required_vars.extend(["DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"])
+    logger.info("Using individual database parameters")
+
+missing_vars = [var for var in required_vars if not getattr(Config, var)]
+if missing_vars:
+    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+# === БАЗА ДАННЫХ ===
+@contextmanager
+def get_db_connection():
+    """Контекстный менеджер для подключения к PostgreSQL"""
+    conn = None
+    try:
+        if Config.DATABASE_URL:
+            logger.info(f"Connecting to PostgreSQL using DATABASE_URL")
+            conn = psycopg2.connect(
+                Config.DATABASE_URL,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=10,
+                sslmode='require'
+            )
+        else:
+            logger.info(f"Connecting to PostgreSQL: {Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}")
+            conn = psycopg2.connect(
+                host=Config.DB_HOST,
+                port=Config.DB_PORT,
+                user=Config.DB_USER,
+                password=Config.DB_PASSWORD,
+                database=Config.DB_NAME,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=10,
+                sslmode='prefer'
+            )
+        
+        conn.autocommit = True
+        logger.info("✅ PostgreSQL connection successful")
+        yield conn
+        
+    except Exception as e:
+        logger.error(f"❌ PostgreSQL connection error: {e}")
+        if Config.DATABASE_URL:
+            logger.error("Connection via DATABASE_URL failed")
+        else:
+            logger.error(f"Connection details - Host: {Config.DB_HOST}, Port: {Config.DB_PORT}, DB: {Config.DB_NAME}, User: {Config.DB_USER}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+            logger.info("PostgreSQL connection closed")
+
 def check_user(fio, year, klass):
     """Проверяет наличие пользователя в БД"""
     logger.info(f"🔍 Starting user verification - FIO: '{fio}', Year: '{year}', Class: '{klass}'")
@@ -256,7 +279,6 @@ def check_user(fio, year, klass):
     formatted_class = format_for_db(klass, "class")
     
     logger.info(f"📝 Normalized data - FIO parts: {fio_set}, Year: {formatted_year}, Class: {formatted_class}")
-    logger.info(f"📊 Data types - Year: {type(formatted_year)}, Class: {type(formatted_class)}")
     
     if formatted_year is None or formatted_class is None:
         logger.warning("❌ Invalid year or class format for database")
@@ -265,21 +287,13 @@ def check_user(fio, year, klass):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # PostgreSQL использует %s для всех типов параметров
                 query = f"SELECT fio FROM {Config.DB_TABLE} WHERE year = %s AND klass = %s"
                 logger.info(f"🗃️ Executing PostgreSQL query: {query}")
-                logger.info(f"📊 Query parameters: year={formatted_year}, klass={formatted_class}")
-                logger.info(f"📋 Using table: {Config.DB_TABLE}")
                 
                 cursor.execute(query, (formatted_year, formatted_class))
                 rows = cursor.fetchall()
                 
                 logger.info(f"📈 Found {len(rows)} records in PostgreSQL for year {formatted_year}, class {formatted_class}")
-                
-                if rows:
-                    logger.info("👥 Database records found:")
-                    for i, row in enumerate(rows, 1):
-                        logger.info(f"  {i}. {row['fio']}")
                 
                 for row in rows:
                     db_fio_set = normalize_fio(row['fio'])
@@ -291,13 +305,12 @@ def check_user(fio, year, klass):
                         
     except Exception as e:
         logger.error(f"❌ Database query error: {e}")
-        logger.error(f"Query details - Table: {Config.DB_TABLE}, Year: {formatted_year}, Class: {formatted_class}")
         return False
     
     logger.info(f"❌ NO MATCH: User '{fio}' not found in {Config.DB_TABLE} for year {formatted_year}, class {formatted_class}")
     return False
 
-# Telegram утилиты
+# === TELEGRAM УТИЛИТЫ ===
 async def send_message(user_id, text, context_or_app, reply_markup=None, parse_mode=None):
     """Универсальная отправка сообщений"""
     try:
@@ -320,14 +333,8 @@ async def send_message(user_id, text, context_or_app, reply_markup=None, parse_m
     except Exception as e:
         logger.error(f"Error sending message to {user_id}: {e}")
 
-# === ТЕКСТОВЫЕ СООБЩЕНИЯ ===
-INSTRUCTION_MESSAGE = (
-    "К сожалению, я тебя не понял, давай попробуем еще раз. Напиши мне ФИ год класс, или /start.\n\n"
-)
-
-
-
 async def get_admin_username(bot):
+    """Получает username админа"""
     try:
         admin_id = Config.ADMIN_ID
         if not admin_id:
@@ -341,8 +348,33 @@ async def get_admin_username(bot):
         logger.error(f"Не удалось получить username админа: {e}")
         return "admin"
 
-async def send_not_found_message(user_id, fio, year, klass, context_or_app):
-    """Отправляет сообщение о том что пользователь не найден (пользователю и админу)"""
+async def send_admin_notification(admin_message, context_or_app):
+    """Отправляет уведомление админу с обработкой ошибок"""
+    if Config.ADMIN_ID:
+        try:
+            await send_message(Config.ADMIN_ID, admin_message, context_or_app)
+            logger.info(f"Sent notification to admin {Config.ADMIN_ID}")
+        except Exception as e:
+            logger.error(f"Error sending notification to admin: {e}")
+
+async def send_positive_check_notification(user_info, user_id, fio, year, klass, teacher=None, context_or_app=None):
+    """Отправляет уведомление админу о положительной проверке"""
+    teacher_info = f"\nКл.рук.: {teacher}" if teacher else ""
+    admin_success_message = (
+        f"✅ ПОЛЬЗОВАТЕЛЬ ПРОШЕЛ ПРОВЕРКУ\n\n"
+        f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
+        f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
+        f"🆔 ID: {user_id}\n"
+        f"📝 Данные из базы:\n"
+        f"ФИО: {fio}\n"
+        f"Год: {year}\n"
+        f"Класс: {klass}{teacher_info}\n\n"
+        f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
+    )
+    await send_admin_notification(admin_success_message, context_or_app)
+
+async def send_not_found_message(user_id, fio, year, klass, context_or_app, teacher=None):
+    """Отправляет сообщение о том что пользователь не найден"""
     admin_username = await get_admin_username(context_or_app.bot if hasattr(context_or_app, 'bot') else context_or_app)
     message = (
         "К сожалению, мы не нашли тебя в базе данных.\n\n"
@@ -354,72 +386,33 @@ async def send_not_found_message(user_id, fio, year, klass, context_or_app):
         "Если данные верные нажми кнопку — мы обязательно разберёмся!"
     )
     
-    # Создаем inline кнопку
-    keyboard = [[InlineKeyboardButton("Связаться с админом", callback_data=f"admin_help_{user_id}_{fio}_{year}_{klass}")]]
+    # Создаем inline кнопку с teacher если есть
+    callback_data = f"admin_help_{user_id}_{fio}_{year}_{klass}"
+    if teacher:
+        callback_data += f"_{teacher}"
+    keyboard = [[InlineKeyboardButton("Связаться с админом", callback_data=callback_data)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await send_message(user_id, message, context_or_app, reply_markup=reply_markup)
     
-    # === УВЕДОМЛЕНИЕ АДМИНУ О НЕГАТИВНОЙ ПРОВЕРКЕ ===
-    if Config.ADMIN_ID:
-        try:
-            admin_message = (
-                f"❌ ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН В БАЗЕ\n\n"
-                f"👤 Пользователь ID: {user_id}\n"
-                f"📝 Введенные данные:\n"
-                f"ФИО: {fio}\n"
-                f"Год: {year}\n"
-                f"Класс: {klass}\n\n"
-                f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
-            )
-            await send_message(Config.ADMIN_ID, admin_message, context_or_app)
-            logger.info(f"Sent negative check notification to admin {Config.ADMIN_ID}")
-        except Exception as e:
-            logger.error(f"Error sending negative check notification to admin: {e}")
+    # Уведомление админу о негативной проверке
+    teacher_info = f"\nКл.рук.: {teacher}" if teacher else ""
+    admin_message = (
+        f"❌ ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН В БАЗЕ\n\n"
+        f"👤 Пользователь ID: {user_id}\n"
+        f"📝 Введенные данные:\n"
+        f"ФИО: {fio}\n"
+        f"Год: {year}\n"
+        f"Класс: {klass}{teacher_info}\n\n"
+        f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
+    )
+    await send_admin_notification(admin_message, context_or_app)
 
-def create_instruction_message():
-    """Создает стандартное сообщение с инструкциями"""
-    return INSTRUCTION_MESSAGE
-
-# Глобальные переменные
+# === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
 verified_users = set()  # Whitelist проверенных пользователей
 user_states = {}        # Состояния пошагового ввода
 
-INCOMPLETE_DATA_MESSAGE = (
-    "Неполные данные!\n\n"
-    "Ты можешь отправить данные в любом из форматов:\n\n"
-    "1️⃣ Одной строкой: Федоров Сергей 2010 2\n\n"
-    "2️⃣ С двоеточиями:\n"
-    "ФИО: Ваше Имя Фамилия\n"
-    "Год: 2015\n"
-    "Класс: 3\n\n"
-    "3️⃣ Или отправь /start для пошагового ввода"
-)
-
-def make_success_message(fio, year, klass, teacher=None, admin_username=None, group_link=None):
-    if admin_username is None:
-        admin_username = "@SergeyBF"
-    return (
-        "✅ Рады знакомству! Скоро твою заявку одобрят.\n\n"
-        "Рекомендуем опубликовать в чате инфо о себе (год выпуска, чем занимаешься и т.п.) с тегом #ктоя\n\n"
-        f"Админ чата Сергей Федоров, 1983-2, {admin_username}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся их задавать!"
-    )
-
-def make_admin_error_message(admin_username):
-    return (
-        f"Произошла ошибка при одобрении заявки. Пожалуйста, попробуй позже или напиши администратору {admin_username}."
-    )
-
-async def handle_private_message_entrypoint(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text or ""
-    await handle_private_message(user_id, text, context)
-
-async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await handle_private_message(user_id, "/start", context)
-
-# Обработчики
+# === ОБРАБОТЧИКИ ===
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает заявки на вступление в группу"""
     try:
@@ -427,11 +420,10 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         chat_id = update.chat_join_request.chat.id
         bio = getattr(update.chat_join_request, 'bio', None)
         logger.info(f"Processing join request from user {user_id} in chat {chat_id}")
-        logger.info(f"Bio present: {bio is not None}")
-        user_info = update.chat_join_request.from_user
-        username = f"@{user_info.username}" if user_info.username else user_info.first_name
         
-        # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+        user_info = update.chat_join_request.from_user
+        
+        # Проверка на запрещенные слова
         is_valid_names, forbidden_words, forbidden_message = check_user_names(
             first_name=user_info.first_name,
             last_name=user_info.last_name,
@@ -447,32 +439,25 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.error(f"Error declining join request due to forbidden words: {e}")
             return
         
-        # === УВЕДОМЛЕНИЕ АДМИНУ О НОВОЙ ЗАЯВКЕ ===
-        if Config.ADMIN_ID:
-            try:
-                admin_notification = (
-                    f"🆕 НОВАЯ ЗАЯВКА НА ВСТУПЛЕНИЕ В ЧАТ\n\n"
-                    f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
-                    f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
-                    f"🆔 ID: {user_id}\n"
-                    f"📝 Bio: {bio if bio else '(нет bio)'}\n\n"
-                    f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
-                )
-                await send_message(Config.ADMIN_ID, admin_notification, context)
-                logger.info(f"Sent join request notification to admin {Config.ADMIN_ID}")
-                
-                # === ШАБЛОННОЕ СООБЩЕНИЕ АДМИНУ ===
-                user_name = user_info.first_name if user_info.first_name else ""
-                admin_template_message = (
-                    f"Привет {user_name}, рад видеть! От Вас пришла заявка на вступление в чат выпускников 30ки. "
-                    f"Для доступа в чат просьба ответить на несколько вопросов. "
-                    f"Просьба перейти в бота @Member30check_bot и нажать start (может быть задержка ответа 1-2 минуты)"
-                )
-                await send_message(Config.ADMIN_ID, admin_template_message, context)
-                logger.info(f"Sent template message to admin {Config.ADMIN_ID}")
-                
-            except Exception as e:
-                logger.error(f"Error sending join request notification to admin: {e}")
+        # Уведомление админу о новой заявке
+        admin_notification = (
+            f"🆕 НОВАЯ ЗАЯВКА НА ВСТУПЛЕНИЕ В ЧАТ\n\n"
+            f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
+            f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
+            f"🆔 ID: {user_id}\n"
+            f"📝 Bio: {bio if bio else '(нет bio)'}\n\n"
+            f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
+        )
+        await send_admin_notification(admin_notification, context)
+        
+        # Шаблонное сообщение админу
+        user_name = user_info.first_name if user_info.first_name else ""
+        admin_template_message = (
+            f"Привет {user_name}, рад видеть! От Вас пришла заявка на вступление в чат выпускников 30ки. "
+            f"Для доступа в чат просьба ответить на несколько вопросов. "
+            f"Просьба перейти в бота @Member30check_bot и нажать start (может быть задержка ответа 1-2 минуты)"
+        )
+        await send_admin_notification(admin_template_message, context)
         
         # Проверяем whitelist
         if user_id in verified_users:
@@ -483,41 +468,37 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.info(f"Approved request from verified user {user_id}")
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
-                try:
-                    admin_username = await get_admin_username(context.bot)
-                    await send_message(user_id, make_admin_error_message(admin_username), context)
-                except Exception as e2:
-                    logger.error(f"Error sending error message to user: {e2}")
+                admin_username = await get_admin_username(context.bot)
+                await send_message(user_id, make_admin_error_message(admin_username), context)
             return
+        
         # Если bio отсутствует
         if not bio:
             logger.info(f"Declining request from {user_id}: no bio")
-            logger.info(f"Request should be declined for user {user_id}. User should write to bot directly.")
             return
+        
         # Парсим данные из bio
         fio, year, klass = parse_text(bio)
         if not (fio and year and klass):
             logger.info(f"Declining request from {user_id}: incomplete data")
             try:
                 await context.bot.decline_chat_join_request(chat_id, user_id)
+                await send_message(user_id, "Заявка отклонена, так как указаны неполные данные. Пожалуйста, напиши боту в личные сообщения для подтверждения.", context)
             except Exception as e:
                 logger.error(f"Error declining join request: {e}")
-            try:
-                await send_message(user_id, "Заявка отклонена, так как указаны неполные данные. Пожалуйста, напиши боту в личные сообщения для подтверждения.", context)
-            except Exception as e2:
-                logger.error(f"Error sending decline message to user: {e2}")
             return
+        
         # Проверяем в базе
         if check_user(fio, year, klass):
             logger.info(f"Approving request from {user_id}")
             try:
                 await context.bot.approve_chat_join_request(chat_id, user_id)
                 logger.info(f"Approved request from {user_id} - user found in database")
-                # --- Обновляем поле in_chat в базе ---
+                
+                # Обновляем поле in_chat в базе
                 try:
                     from datetime import datetime
                     today = datetime.utcnow().date()
-                    # Получаем username или user_id
                     tg_username_val = user_info.username if user_info.username else str(user_id)
                     with get_db_connection() as conn:
                         with conn.cursor() as cursor:
@@ -533,52 +514,23 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                             logger.info(f"Updated in_chat and tg_username for user: {fio}, {year}, {klass} -> {today}, {tg_username_val}")
                 except Exception as e:
                     logger.error(f"Error updating in_chat/tg_username in DB: {e}")
-                # Получаем ссылку на чат
-                chat_info = await context.bot.get_chat(chat_id)
-                group_link = None
-                if getattr(chat_info, 'username', None):
-                    group_link = f"https://t.me/{chat_info.username}"
-                elif getattr(chat_info, 'invite_link', None):
-                    group_link = chat_info.invite_link
-                else:
-                    group_link = "https://t.me/"
+                
+                # Отправляем сообщение пользователю
                 admin_username = await get_admin_username(context.bot)
-                # Отправляем личное сообщение пользователю с правильной ссылкой
-                response = make_success_message(fio, year, klass, admin_username=admin_username, group_link=group_link)
+                response = make_success_message(fio, year, klass, admin_username=admin_username)
                 await send_message(user_id, response, context)
                 
-                # === УВЕДОМЛЕНИЕ АДМИНУ О ПОЛОЖИТЕЛЬНОЙ ПРОВЕРКЕ ===
-                if Config.ADMIN_ID:
-                    try:
-                        admin_success_message = (
-                            f"✅ ПОЛЬЗОВАТЕЛЬ ПРОШЕЛ ПРОВЕРКУ\n\n"
-                            f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
-                            f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
-                            f"🆔 ID: {user_id}\n"
-                            f"📝 Данные из базы:\n"
-                            f"ФИО: {fio}\n"
-                            f"Год: {year}\n"
-                            f"Класс: {klass}\n\n"
-                            f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
-                        )
-                        await send_message(Config.ADMIN_ID, admin_success_message, context)
-                        logger.info(f"Sent positive check notification to admin {Config.ADMIN_ID}")
-                    except Exception as e:
-                        logger.error(f"Error sending positive check notification to admin: {e}")
+                # Уведомление админу о положительной проверке
+                await send_positive_check_notification(user_info, user_id, fio, year, klass, context_or_app=context)
+                
             except Exception as e:
                 logger.error(f"Error approving request: {e}")
-                try:
-                    admin_username = await get_admin_username(context.bot)
-                    await send_message(user_id, make_admin_error_message(admin_username), context)
-                except Exception as e2:
-                    logger.error(f"Error sending error message to user: {e2}")
+                admin_username = await get_admin_username(context.bot)
+                await send_message(user_id, make_admin_error_message(admin_username), context)
         else:
             logger.info(f"Declining request from {user_id}: user not found")
-            logger.info(f"Request should be declined for {user_id} - user not found in database")
-            try:
-                await send_not_found_message(user_id, fio, year, klass, context)
-            except Exception as e2:
-                logger.error(f"Error sending not found message to user: {e2}")
+            await send_not_found_message(user_id, fio, year, klass, context)
+            
     except Exception as e:
         logger.error(f"Error handling join request: {e}")
         try:
@@ -589,12 +541,13 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error(f"Error sending error message to user: {e2}")
 
 async def handle_private_message(user_id, text, telegram_app):
+    """Обрабатывает приватные сообщения"""
     # Исключение для админа
     if int(user_id) == int(Config.ADMIN_ID) and text.strip().lower() == '/start':
         await send_message(user_id, "Привет, я проверяю заявки в чате выпускников 30ки. Сюда будут приходить одобренные и отклонённые заявки.", telegram_app)
         return
     
-    # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+    # Проверка на запрещенные слова
     try:
         user_info = await telegram_app.bot.get_chat(user_id)
         is_valid_names, forbidden_words, forbidden_message = check_user_names(
@@ -609,25 +562,28 @@ async def handle_private_message(user_id, text, telegram_app):
             return
     except Exception as e:
         logger.error(f"Error checking user names for {user_id}: {e}")
-        # Если не удалось получить информацию о пользователе, продолжаем обработку
-    # Если пользователь в процессе пошагового ввода — только handle_step_input!
+    
+    # Если пользователь в процессе пошагового ввода
     if user_id in user_states:
         await handle_step_input(user_id, text, telegram_app)
         return
+    
     # Команда /start или первое сообщение
     if text.strip().lower() == '/start':
         await start_step_input(user_id, telegram_app)
         return
-    # --- Новое: если пользователь не в user_states и написал только два слова (ФИО), запускаем пошаговый сценарий ---
+    
+    # Если пользователь написал только два слова (ФИО), запускаем пошаговый сценарий
     name_parts = text.strip().split()
     if len(name_parts) == 2 and all(part.isalpha() for part in name_parts):
         await start_step_input(user_id, telegram_app)
         return
+    
     # Если пользователь написал что-то кроме данных, показываем приветствие
-    if not parse_text(text)[0]:  # Если не смогли распарсить данные
-        welcome_message = create_instruction_message()
-        await send_message(user_id, welcome_message, telegram_app)
+    if not parse_text(text)[0]:
+        await send_message(user_id, INSTRUCTION_MESSAGE, telegram_app)
         return
+    
     # Парсинг данных
     fio, year, klass = parse_text(text)
     if fio and year and klass:
@@ -637,34 +593,18 @@ async def handle_private_message(user_id, text, telegram_app):
             response = make_success_message(fio, year, klass, admin_username=admin_username)
             await send_message(user_id, response, telegram_app)
             
-            # === УВЕДОМЛЕНИЕ АДМИНУ О ПОЛОЖИТЕЛЬНОЙ ПРОВЕРКЕ ===
-            if Config.ADMIN_ID:
-                try:
-                    # Получаем информацию о пользователе
-                    user_info = await telegram_app.bot.get_chat(user_id)
-                    admin_success_message = (
-                        f"✅ ПОЛЬЗОВАТЕЛЬ ПРОШЕЛ ПРОВЕРКУ\n\n"
-                        f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
-                        f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
-                        f"🆔 ID: {user_id}\n"
-                        f"📝 Данные из базы:\n"
-                        f"ФИО: {fio}\n"
-                        f"Год: {year}\n"
-                        f"Класс: {klass}\n\n"
-                        f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
-                    )
-                    await send_message(Config.ADMIN_ID, admin_success_message, telegram_app)
-                    logger.info(f"Sent positive check notification to admin {Config.ADMIN_ID}")
-                except Exception as e:
-                    logger.error(f"Error sending positive check notification to admin: {e}")
+            # Уведомление админу о положительной проверке
+            user_info = await telegram_app.bot.get_chat(user_id)
+            await send_positive_check_notification(user_info, user_id, fio, year, klass, context_or_app=telegram_app)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
     else:
         await send_message(user_id, INCOMPLETE_DATA_MESSAGE, telegram_app)
 
 async def handle_step_input(user_id, text, telegram_app, chat_id=None):
+    """Обрабатывает пошаговый ввод данных"""
     try:
-        # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+        # Проверка на запрещенные слова
         try:
             user_info = await telegram_app.bot.get_chat(user_id)
             is_valid_names, forbidden_words, forbidden_message = check_user_names(
@@ -675,19 +615,20 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
             
             if not is_valid_names:
                 logger.info(f"Rejecting step input from {user_id}: forbidden words found - {forbidden_words}")
-                del user_states[user_id]  # Очищаем состояние
+                del user_states[user_id]
                 await send_message(user_id, forbidden_message, telegram_app)
                 return
         except Exception as e:
             logger.error(f"Error checking user names for {user_id}: {e}")
-            # Если не удалось получить информацию о пользователе, продолжаем обработку
         
         state = user_states[user_id]
         step = state['step']
+        
         if text.strip().lower() == '/cancel':
             del user_states[user_id]
             await send_message(user_id, "Ввод данных отменен. Отправьте /start чтобы начать заново.", telegram_app)
             return
+        
         if step == 'waiting_name':
             name_parts = text.strip().split()
             if len(name_parts) >= 2:
@@ -717,36 +658,20 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
             klass = state['data']['class']
             teacher = state['data']['teacher']
             del user_states[user_id]
+            
             if check_user(fio, year, klass):
                 verified_users.add(user_id)
                 admin_username = await get_admin_username(telegram_app.bot)
                 response = make_success_message(fio, year, klass, teacher, admin_username)
                 await send_message(user_id, response, telegram_app)
                 
-                # === УВЕДОМЛЕНИЕ АДМИНУ О ПОЛОЖИТЕЛЬНОЙ ПРОВЕРКЕ ===
-                if Config.ADMIN_ID:
-                    try:
-                        # Получаем информацию о пользователе
-                        user_info = await telegram_app.bot.get_chat(user_id)
-                        admin_success_message = (
-                            f"✅ ПОЛЬЗОВАТЕЛЬ ПРОШЕЛ ПРОВЕРКУ\n\n"
-                            f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
-                            f"📧 Никнейм: @{user_info.username if user_info.username else '(нет username)'}\n"
-                            f"🆔 ID: {user_id}\n"
-                            f"📝 Данные из базы:\n"
-                            f"ФИО: {fio}\n"
-                            f"Год: {year}\n"
-                            f"Класс: {klass}\n"
-                            f"Кл.рук.: {teacher}\n\n"
-                            f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
-                        )
-                        await send_message(Config.ADMIN_ID, admin_success_message, telegram_app)
-                        logger.info(f"Sent positive check notification to admin {Config.ADMIN_ID}")
-                    except Exception as e:
-                        logger.error(f"Error sending positive check notification to admin: {e}")
+                # Уведомление админу о положительной проверке
+                user_info = await telegram_app.bot.get_chat(user_id)
+                await send_positive_check_notification(user_info, user_id, fio, year, klass, teacher, telegram_app)
             else:
-                await send_not_found_message(user_id, fio, year, klass, telegram_app)
+                await send_not_found_message(user_id, fio, year, klass, telegram_app, teacher)
             return
+        
         await send_message(user_id, response, telegram_app)
     except Exception as e:
         logger.error(f"Error in step input: {e}")
@@ -755,7 +680,7 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
 
 async def start_step_input(user_id, telegram_app):
     """Начинает пошаговый ввод данных"""
-    # === ПРОВЕРКА НА ЗАПРЕЩЕННЫЕ СЛОВА ===
+    # Проверка на запрещенные слова
     try:
         user_info = await telegram_app.bot.get_chat(user_id)
         is_valid_names, forbidden_words, forbidden_message = check_user_names(
@@ -770,7 +695,6 @@ async def start_step_input(user_id, telegram_app):
             return
     except Exception as e:
         logger.error(f"Error checking user names for {user_id}: {e}")
-        # Если не удалось получить информацию о пользователе, продолжаем обработку
     
     user_states[user_id] = {'step': 'waiting_name', 'data': {}}
     response = (
@@ -796,56 +720,47 @@ async def handle_callback_query(update, telegram_app):
                 fio = parts[3]
                 year = parts[4]
                 klass = parts[5] if len(parts) > 5 else ""
+                teacher = parts[6] if len(parts) > 6 else ""
                 
                 user_info = query.from_user
                 username = f"@{user_info.username}" if user_info.username else "без username"
                 
-                user_message = (
-                    "Администратор чата в скором времени с Вами свяжется."
-                )
+                user_message = "Администратор чата в скором времени с Вами свяжется."
                 await send_message(user_id, user_message, telegram_app)
                 
-                if Config.ADMIN_ID:
-                    admin_message = (
-                        f"🆘 ЗАПРОС НА ПОМОЩЬ ОТ ПОЛЬЗОВАТЕЛЯ\n\n"
-                        f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
-                        f"📧 Username: {username}\n"
-                        f"🆔 ID: {user_id}\n"
-                        f"📱 Язык: {user_info.language_code or 'не указан'}\n\n"
-                        f"📝 Введенные данные:\n"
-                        f"ФИО: {fio}\n"
-                        f"Год: {year}\n"
-                        f"Класс: {klass}\n\n"
-                        f"💬 Сообщение: Пользователь утверждает что является выпускником ФМЛ 30, но не найден в базе данных.\n\n"
-                        f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
-                    )
-                    await send_message(Config.ADMIN_ID, admin_message, telegram_app)
-            else:
-                # Fallback для старого формата
-                user_info = query.from_user
-                username = f"@{user_info.username}" if user_info.username else "без username"
-                
-                user_message = (
-                    "Администратор чата в скором времени с Вами свяжется."
+                # Уведомление админу о запросе помощи
+                teacher_info = f"\nКл.рук.: {teacher}" if teacher else ""
+                admin_message = (
+                    f"🆘 ЗАПРОС НА ПОМОЩЬ ОТ ПОЛЬЗОВАТЕЛЯ\n\n"
+                    f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
+                    f"📧 Username: {username}\n"
+                    f"🆔 ID: {user_id}\n"
+                    f"📱 Язык: {user_info.language_code or 'не указан'}\n\n"
+                    f"📝 Введенные данные:\n"
+                    f"ФИО: {fio}\n"
+                    f"Год: {year}\n"
+                    f"Класс: {klass}{teacher_info}\n\n"
+                    f"💬 Сообщение: Пользователь утверждает что является выпускником ФМЛ 30, но не найден в базе данных.\n\n"
+                    f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
                 )
-                await send_message(user_id, user_message, telegram_app)
-                
-                if Config.ADMIN_ID:
-                    admin_message = (
-                        f"🆘 ЗАПРОС НА ПОМОЩЬ ОТ ПОЛЬЗОВАТЕЛЯ\n\n"
-                        f"👤 Пользователь: {user_info.first_name} {user_info.last_name or ''}\n"
-                        f"📧 Username: {username}\n"
-                        f"🆔 ID: {user_id}\n"
-                        f"📱 Язык: {user_info.language_code or 'не указан'}\n\n"
-                        f"💬 Сообщение: Пользователь утверждает что является выпускником ФМЛ 30, но не найден в базе данных.\n\n"
-                        f"🔗 Для ответа перейдите в чат: tg://user?id={user_id}"
-                    )
-                    await send_message(Config.ADMIN_ID, admin_message, telegram_app)
+                await send_admin_notification(admin_message, telegram_app)
                 
     except Exception as e:
         logger.error(f"Error handling callback query: {e}")
 
-# Инициализация Telegram
+# === ENTRY POINTS ===
+async def handle_private_message_entrypoint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point для приватных сообщений"""
+    user_id = update.effective_user.id
+    text = update.message.text or ""
+    await handle_private_message(user_id, text, context)
+
+async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point для команды /start"""
+    user_id = update.effective_user.id
+    await handle_private_message(user_id, "/start", context)
+
+# === ИНИЦИАЛИЗАЦИЯ ===
 try:
     telegram_app = ApplicationBuilder().token(Config.BOT_TOKEN).build()
     telegram_app.add_handler(ChatJoinRequestHandler(handle_join_request))
@@ -857,7 +772,7 @@ except Exception as e:
     logger.error(f"Failed to initialize Telegram application: {e}")
     raise
 
-# === ЗАЩИТА WEBHOOK ПО СЕКРЕТУ ===
+# === WEBHOOK ===
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}" if WEBHOOK_SECRET else "/"
 
