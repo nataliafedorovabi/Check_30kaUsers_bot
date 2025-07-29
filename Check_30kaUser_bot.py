@@ -183,7 +183,7 @@ def make_success_message(fio, year, klass, teacher=None, admin_username=None, gr
     return (
         "✅ Рады знакомству! Скоро твою заявку одобрят.\n\n"
         "Рекомендуем опубликовать в чате инфо о себе (год выпуска, чем занимаешься и т.п.) с тегом #ктоя\n\n"
-        f"Админ чата Сергей Федоров, 1983-2, {admin_username}. Если будут вопросы по Клубу, Фонду30, сайту 30ka.ru, чату, школе - не стесняйся их задавать!"
+        f"Админ чата Сергей Федоров, 1983-2, {admin_username}. Если будут вопросы по Клубу, Фонду30, сайту <a href=\"https://30ka.ru\">30ka.ru</a>, чату, школе - не стесняйся их задавать!"
     )
 
 def make_admin_error_message(admin_username):
@@ -518,7 +518,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 # Отправляем сообщение пользователю
                 admin_username = await get_admin_username(context.bot)
                 response = make_success_message(fio, year, klass, admin_username=admin_username)
-                await send_message(user_id, response, context)
+                await send_message(user_id, response, context, parse_mode="HTML")
                 
                 # Уведомление админу о положительной проверке
                 await send_positive_check_notification(user_info, user_id, fio, year, klass, context_or_app=context)
@@ -591,7 +591,7 @@ async def handle_private_message(user_id, text, telegram_app):
             verified_users.add(user_id)
             admin_username = await get_admin_username(telegram_app.bot)
             response = make_success_message(fio, year, klass, admin_username=admin_username)
-            await send_message(user_id, response, telegram_app)
+            await send_message(user_id, response, telegram_app, parse_mode="HTML")
             
             # Уведомление админу о положительной проверке
             user_info = await telegram_app.bot.get_chat(user_id)
@@ -663,7 +663,7 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
                 verified_users.add(user_id)
                 admin_username = await get_admin_username(telegram_app.bot)
                 response = make_success_message(fio, year, klass, teacher, admin_username)
-                await send_message(user_id, response, telegram_app)
+                await send_message(user_id, response, telegram_app, parse_mode="HTML")
                 
                 # Уведомление админу о положительной проверке
                 user_info = await telegram_app.bot.get_chat(user_id)
