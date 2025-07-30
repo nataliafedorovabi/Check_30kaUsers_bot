@@ -497,6 +497,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                     from datetime import datetime
                     today = datetime.utcnow().date()
                     tg_username_val = user_info.username if user_info.username else str(user_id)
+                    logger.info(f"🔄 Starting DB update for user: {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                    
                     with get_db_connection() as conn:
                         with conn.cursor() as cursor:
                             update_query = f"""
@@ -507,10 +509,21 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                                     OR lower(replace(fio, 'е', 'ё')) = lower(replace(%s, 'е', 'ё'))
                                 )
                             """
-                            cursor.execute(update_query, (str(today), tg_username_val, format_for_db(year, "year"), format_for_db(klass, "class"), fio, fio))
-                            logger.info(f"Updated in_chat and tg_username for user: {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                            params = (str(today), tg_username_val, format_for_db(year, "year"), format_for_db(klass, "class"), fio, fio)
+                            logger.info(f"🗃️ Executing UPDATE query with params: {params}")
+                            
+                            cursor.execute(update_query, params)
+                            rows_affected = cursor.rowcount
+                            logger.info(f"📊 UPDATE query affected {rows_affected} rows")
+                            
+                            if rows_affected > 0:
+                                logger.info(f"✅ Successfully updated in_chat and tg_username for user: {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                            else:
+                                logger.warning(f"⚠️ UPDATE query found no matching rows for user: {fio}, {year}, {klass}")
+                                
                 except Exception as e:
-                    logger.error(f"Error updating in_chat/tg_username in DB: {e}")
+                    logger.error(f"❌ Error updating in_chat/tg_username in DB: {e}")
+                    logger.error(f"❌ Error details - user: {fio}, {year}, {klass}, tg_username: {tg_username_val}")
                 
                 # Отправляем сообщение пользователю
                 admin_username = await get_admin_username(context.bot)
@@ -586,12 +599,46 @@ async def handle_private_message(user_id, text, telegram_app):
     if fio and year and klass:
         if check_user(fio, year, klass):
             verified_users.add(user_id)
+            
+            # Обновляем поле in_chat в базе
+            try:
+                from datetime import datetime
+                today = datetime.utcnow().date()
+                user_info = await telegram_app.bot.get_chat(user_id)
+                tg_username_val = user_info.username if user_info.username else str(user_id)
+                logger.info(f"🔄 Starting DB update for user (private message): {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                
+                with get_db_connection() as conn:
+                    with conn.cursor() as cursor:
+                        update_query = f"""
+                            UPDATE {Config.DB_TABLE}
+                            SET in_chat = %s, tg_username = %s
+                            WHERE year = %s AND klass = %s AND (
+                                lower(replace(fio, 'ё', 'е')) = lower(replace(%s, 'ё', 'е'))
+                                OR lower(replace(fio, 'е', 'ё')) = lower(replace(%s, 'е', 'ё'))
+                            )
+                        """
+                        params = (str(today), tg_username_val, format_for_db(year, "year"), format_for_db(klass, "class"), fio, fio)
+                        logger.info(f"🗃️ Executing UPDATE query (private message) with params: {params}")
+                        
+                        cursor.execute(update_query, params)
+                        rows_affected = cursor.rowcount
+                        logger.info(f"📊 UPDATE query (private message) affected {rows_affected} rows")
+                        
+                        if rows_affected > 0:
+                            logger.info(f"✅ Successfully updated in_chat and tg_username (private message) for user: {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                        else:
+                            logger.warning(f"⚠️ UPDATE query (private message) found no matching rows for user: {fio}, {year}, {klass}")
+                            
+            except Exception as e:
+                logger.error(f"❌ Error updating in_chat/tg_username in DB (private message): {e}")
+                logger.error(f"❌ Error details - user: {fio}, {year}, {klass}, tg_username: {tg_username_val}")
+            
             admin_username = await get_admin_username(telegram_app.bot)
             response = make_success_message(fio, year, klass, admin_username=admin_username)
             await send_message(user_id, response, telegram_app, parse_mode="HTML")
             
             # Уведомление админу о положительной проверке
-            user_info = await telegram_app.bot.get_chat(user_id)
             await send_positive_check_notification(user_info, user_id, fio, year, klass, context_or_app=telegram_app)
         else:
             await send_not_found_message(user_id, fio, year, klass, telegram_app)
@@ -658,12 +705,46 @@ async def handle_step_input(user_id, text, telegram_app, chat_id=None):
             
             if check_user(fio, year, klass):
                 verified_users.add(user_id)
+                
+                # Обновляем поле in_chat в базе
+                try:
+                    from datetime import datetime
+                    today = datetime.utcnow().date()
+                    user_info = await telegram_app.bot.get_chat(user_id)
+                    tg_username_val = user_info.username if user_info.username else str(user_id)
+                    logger.info(f"🔄 Starting DB update for user (step input): {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                    
+                    with get_db_connection() as conn:
+                        with conn.cursor() as cursor:
+                            update_query = f"""
+                                UPDATE {Config.DB_TABLE}
+                                SET in_chat = %s, tg_username = %s
+                                WHERE year = %s AND klass = %s AND (
+                                    lower(replace(fio, 'ё', 'е')) = lower(replace(%s, 'ё', 'е'))
+                                    OR lower(replace(fio, 'е', 'ё')) = lower(replace(%s, 'е', 'ё'))
+                                )
+                            """
+                            params = (str(today), tg_username_val, format_for_db(year, "year"), format_for_db(klass, "class"), fio, fio)
+                            logger.info(f"🗃️ Executing UPDATE query (step input) with params: {params}")
+                            
+                            cursor.execute(update_query, params)
+                            rows_affected = cursor.rowcount
+                            logger.info(f"📊 UPDATE query (step input) affected {rows_affected} rows")
+                            
+                            if rows_affected > 0:
+                                logger.info(f"✅ Successfully updated in_chat and tg_username (step input) for user: {fio}, {year}, {klass} -> {today}, {tg_username_val}")
+                            else:
+                                logger.warning(f"⚠️ UPDATE query (step input) found no matching rows for user: {fio}, {year}, {klass}")
+                                
+                except Exception as e:
+                    logger.error(f"❌ Error updating in_chat/tg_username in DB (step input): {e}")
+                    logger.error(f"❌ Error details - user: {fio}, {year}, {klass}, tg_username: {tg_username_val}")
+                
                 admin_username = await get_admin_username(telegram_app.bot)
                 response = make_success_message(fio, year, klass, teacher, admin_username)
                 await send_message(user_id, response, telegram_app, parse_mode="HTML")
                 
                 # Уведомление админу о положительной проверке
-                user_info = await telegram_app.bot.get_chat(user_id)
                 await send_positive_check_notification(user_info, user_id, fio, year, klass, teacher, telegram_app)
             else:
                 await send_not_found_message(user_id, fio, year, klass, telegram_app, teacher)
